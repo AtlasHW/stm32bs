@@ -1,37 +1,36 @@
 use anyhow::{bail, Context, Result};
 use console::style;
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::ProgressBar;
 use liquid::model::KString;
 use liquid::{Parser, ParserBuilder};
 use liquid_core::{Object, Value};
-use std::sync::{Arc, Mutex};
+use std::env;
 use std::{
-    cell::RefCell,
     fs,
     path::{Path, PathBuf},
 };
-use walkdir::{DirEntry, WalkDir};
+use tempfile::TempDir;
+//use walkdir::{DirEntry, WalkDir};
 
-use crate::config::TemplateConfig;
-use crate::emoji;
-use crate::filenames::substitute_filename;
-use crate::hooks::PoisonError;
-use crate::include_exclude::*;
+use crate::config::locate_template_configs;
+use crate::git;
+use crate::git::tmp_dir;
+use crate::interactive::prompt_and_check_variable;
+use crate::progressbar;
 use crate::progressbar::spinner;
+use crate::project_variables::{StringEntry, StringKind, TemplateSlots, VarInfo};
 use crate::template_filters::*;
-use crate::template_variables::{
-    get_authors, get_os_arch, Authors, CrateName, ProjectDir, ProjectName,
-};
+use crate::template_variables::{get_authors, /*get_os_arch,*/ Authors,};
+use crate::stm32_device::chip_info::ChipInfo;
+use crate::stm32_device::chip_info::FREQ;
+use crate::user_parsed_input::TemplateLocation;
 use crate::user_parsed_input::UserParsedInput;
-
-pub type LiquidObjectResource = Arc<Mutex<RefCell<Object>>>;
 
 pub fn create_liquid_engine(
     template_dir: PathBuf,
-    liquid_object: LiquidObjectResource,
+    liquid_object: Object,
     allow_commands: bool,
     silent: bool,
-    rhai_filter_files: Arc<Mutex<Vec<PathBuf>>>,
 ) -> Parser {
     ParserBuilder::with_stdlib()
         .filter(KebabCaseFilterParser)
@@ -47,16 +46,15 @@ pub fn create_liquid_engine(
             liquid_object,
             allow_commands,
             silent,
-            rhai_filter_files,
         ))
         .build()
         .expect("can't fail due to no partials support")
 }
 
 /// create liquid object for the template, and pre-fill it with all known variables
-pub fn create_liquid_object(user_parsed_input: &UserParsedInput) -> Result<LiquidObjectResource> {
+pub fn create_liquid_object(user_parsed_input: &UserParsedInput) -> Result<Object> {
     let authors: Authors = get_authors()?;
-    let os_arch = get_os_arch();
+    let os_arch = format!("{}-{}", env::consts::OS, env::consts::ARCH);
 
     let mut liquid_object = Object::new();
 
@@ -64,87 +62,121 @@ pub fn create_liquid_object(user_parsed_input: &UserParsedInput) -> Result<Liqui
         liquid_object.insert("project-name".into(), Value::Scalar(name.to_owned().into()));
     }
 
-    liquid_object.insert(
-        "crate_type".into(),
-        Value::Scalar(user_parsed_input.crate_type().to_string().into()),
-    );
+    liquid_object.insert("crate_type".into(), Value::Scalar("bin".to_string().into()));
     liquid_object.insert("authors".into(), Value::Scalar(authors.author.into()));
     liquid_object.insert("username".into(), Value::Scalar(authors.username.into()));
     liquid_object.insert("os-arch".into(), Value::Scalar(os_arch.into()));
 
-    liquid_object.insert(
-        "is_init".into(),
-        Value::Scalar(user_parsed_input.init().into()),
-    );
-
-    Ok(Arc::new(Mutex::new(RefCell::new(liquid_object))))
+    Ok(liquid_object)
 }
 
-pub fn set_project_name_variables(
-    liquid_object: &LiquidObjectResource,
-    project_dir: &ProjectDir,
-    project_name: &ProjectName,
-    crate_name: &CrateName,
+pub fn set_project_variables(
+    liquid_object: &mut Object,
+    chipinfo: &ChipInfo,
+    project_name: &String,
+    project_type: usize,
 ) -> Result<()> {
-    let ref_cell = liquid_object.lock().map_err(|_| PoisonError)?;
-    let mut liquid_object = ref_cell.borrow_mut();
-
     liquid_object.insert(
         "project-name".into(),
-        Value::Scalar(project_name.as_ref().to_owned().into()),
+        Value::Scalar(project_name.to_owned().into()),
+    );
+    liquid_object.insert(
+        "target".into(), 
+        Value::Scalar(chipinfo.target.to_owned().into()),
+    );
+    liquid_object.insert(
+        "pac_name".into(), 
+        Value::Scalar(chipinfo.pac.pac_name.to_owned().into()),
+    );
+    liquid_object.insert(
+        "pac_ver".into(), 
+        Value::Scalar(chipinfo.pac.version.to_owned().into()),
+    );
+    liquid_object.insert(
+        "pac_feature".into(), 
+        Value::Scalar(chipinfo.pac.features.to_owned().into()),
+    );
+    liquid_object.insert(
+        "flash_origin".into(), 
+        Value::Scalar("0x08000000".into()),
+    );
+    liquid_object.insert(
+        "flash_size".into(), 
+        Value::Scalar(chipinfo.flash.to_owned().into()),
+    );
+    liquid_object.insert(
+        "ram1_origin".into(), 
+        Value::Scalar("0x20000000".into()),
+    );
+    liquid_object.insert(
+        "ram1_size".into(), 
+        Value::Scalar(chipinfo.ram1.to_owned().into()),
+    );
+    liquid_object.insert(
+        "pn".into(), 
+        Value::Scalar(chipinfo.pn.to_owned().into()),
     );
 
-    liquid_object.insert(
-        "crate_name".into(),
-        Value::Scalar(crate_name.as_ref().to_owned().into()),
-    );
-
-    liquid_object.insert(
-        "within_cargo_project".into(),
-        Value::Scalar(is_within_cargo_project(project_dir.as_ref()).into()),
-    );
+    let freq = match chipinfo.freq {
+        FREQ::SINGLE(f) => f,
+        FREQ::DUAL(f1, f2) => {
+            if f1 > f2 {
+                f2
+            } else {
+                f1
+            }
+        }
+    };
+    if project_type == 0 {
+        liquid_object.insert(
+            "frequency".into(), 
+            Value::Scalar(freq.into()),
+        );
+    } 
 
     Ok(())
 }
 
-fn is_within_cargo_project(project_dir: &Path) -> bool {
-    Path::new(project_dir)
-        .ancestors()
-        .any(|folder| folder.join("Cargo.toml").exists())
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn walk_dir(
-    template_config: &mut TemplateConfig,
-    project_dir: &Path,
-    hook_files: &[String],
-    liquid_object: &LiquidObjectResource,
-    rhai_engine: Parser,
-    rhai_filter_files: &Arc<Mutex<Vec<PathBuf>>>,
-    mp: &mut MultiProgress,
-    quiet: bool,
+    include_list: &Vec<String>,
+    user_parsed_input: &UserParsedInput,
+    template_dir: &Path,
+    liquid_object: &mut Object,
 ) -> Result<()> {
-    fn is_git_metadata(entry: &DirEntry) -> bool {
-        entry
-            .path()
-            .components()
-            .any(|c| c == std::path::Component::Normal(".git".as_ref()))
-    }
+    // fn is_git_metadata(entry: &DirEntry) -> bool {
+    //     entry
+    //         .path()
+    //         .components()
+    //         .any(|c| c == std::path::Component::Normal(".git".as_ref()))
+    // }
 
-    let matcher = Matcher::new(template_config, project_dir, hook_files)?;
+    let rhai_engine = create_liquid_engine(
+        template_dir.to_owned(),
+        liquid_object.clone(),
+        user_parsed_input.allow_commands(),
+        user_parsed_input.silent(),
+    );
+
+    let mp = progressbar::new();
     let spinner_style = spinner();
 
-    let mut files_with_errors = Vec::new();
-    let files = WalkDir::new(project_dir)
-        .sort_by_file_name()
-        .contents_first(true)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|e| !is_git_metadata(e))
-        .filter(|e| e.path() != project_dir)
-        .collect::<Vec<_>>();
-    let total = files.len().to_string();
-    for (progress, entry) in files.into_iter().enumerate() {
+    //    let mut files_with_errors = Vec::new();
+    // let files = WalkDir::new(template_dir)
+    //     .sort_by_file_name()
+    //     .contents_first(true)
+    //     .into_iter()
+    //     .filter_map(Result::ok)
+    //     .filter(|e| !is_git_metadata(e))
+    //     .filter(|e| e.file_type().is_file())
+    //     .collect::<Vec<_>>();
+
+    
+    if include_list.is_empty() {
+        bail!("No files to include in the template.");
+    }
+    let total = include_list.len().to_string();
+    for (progress, filename) in include_list.iter().enumerate() {
         let pb = mp.add(ProgressBar::new(50));
         pb.set_style(spinner_style.clone());
         pb.set_prefix(format!(
@@ -153,111 +185,52 @@ pub fn walk_dir(
             total,
             width = total.len()
         ));
-
-        if quiet {
-            pb.set_draw_target(indicatif::ProgressDrawTarget::hidden());
+        let filepath = PathBuf::from(template_dir).join(filename);
+        pb.set_message(format!("Processing: {filename:?}"));
+        if !filepath.exists() {
+            bail!(
+                "File `{}` does not exist in the template directory.",
+                filepath.display()
+            );
         }
-
-        let filename = entry.path();
-        let relative_path = filename.strip_prefix(project_dir)?;
-        let filename_display = relative_path.display();
-        // Attempt to NOT process files used as liquid rhai filters.
-        // Only works if filter file has been used before an attempt to process it!
-        if rhai_filter_files
-            .lock()
-            .map_err(|_| PoisonError)?
-            .iter()
-            .any(|rhai_filter| relative_path.eq(rhai_filter.as_path()))
-        {
-            pb.finish_with_message(format!(
-                "Skipped: {filename_display} - used as Rhai filter!"
-            ));
-            continue;
-        }
-
-        pb.set_message(format!("Processing: {filename_display}"));
-
-        match matcher.should_include(relative_path) {
-            ShouldInclude::Include => {
-                if entry.file_type().is_file() {
-                    match template_process_file(liquid_object, &rhai_engine, filename) {
-                        Err(e) => {
-                            files_with_errors
-                                .push((relative_path.display().to_string(), e.clone()));
-                        }
-                        Ok(new_contents) => {
-                            let new_filename =
-                                substitute_filename(filename, &rhai_engine, liquid_object)
-                                    .with_context(|| {
-                                        format!(
-                                            "{} {} `{}`",
-                                            emoji::ERROR,
-                                            style("Error templating a filename").bold().red(),
-                                            style(filename.display()).bold()
-                                        )
-                                    })?;
-                            pb.inc(25);
-                            let relative_path = new_filename.strip_prefix(project_dir)?;
-                            let f = relative_path.display();
-                            fs::create_dir_all(new_filename.parent().unwrap()).unwrap();
-                            fs::write(new_filename.as_path(), new_contents).with_context(|| {
-                                format!(
-                                    "{} {} `{}`",
-                                    emoji::ERROR,
-                                    style("Error writing rendered file.").bold().red(),
-                                    style(new_filename.display()).bold()
-                                )
-                            })?;
-                            if filename != new_filename {
-                                fs::remove_file(filename)?;
-                            }
-                            pb.inc(50);
-                            pb.finish_with_message(format!("Done: {f}"));
-                        }
-                    }
-                } else {
-                    let new_filename = substitute_filename(filename, &rhai_engine, liquid_object)?;
-                    let relative_path = new_filename.strip_prefix(project_dir)?;
-                    let f = relative_path.display();
-                    pb.inc(50);
-                    if filename != new_filename {
-                        fs::remove_dir_all(filename)?;
-                    }
-                    pb.inc(50);
-                    pb.finish_with_message(format!("Done: {f}"));
-                }
+        match template_process_file(liquid_object, &rhai_engine, &filepath) {
+            Ok(new_contents) => {
+                pb.inc(25);
+                fs::create_dir_all(filepath.parent().unwrap()).unwrap();
+                fs::write(filepath, new_contents).with_context(|| {
+                    format!(
+                        "⛔ {} `{}`",
+                        style("Error writing rendered file.").bold().red(),
+                        style(filename).bold()
+                    )
+                })?;
+                pb.inc(50);
+                pb.finish_with_message(format!("Done: {filename}"));
             }
-            ShouldInclude::Exclude => {
-                pb.finish_with_message(format!("Skipped: {filename_display}"));
-            }
-            ShouldInclude::Ignore => {
-                pb.finish_with_message(format!("Ignored: {filename_display}"));
+            Err(e) => {
+                bail!(
+                    "⛔ Error processing file `{}`: {}",
+                    filepath.display(),
+                    e.to_string()
+                );
             }
         }
     }
 
-    if files_with_errors.is_empty() {
-        Ok(())
-    } else {
-        bail!(print_files_with_errors_warning(files_with_errors))
-    }
+    Ok(())
 }
 
-fn template_process_file(
-    context: &LiquidObjectResource,
-    parser: &Parser,
-    file: &Path,
-) -> liquid_core::Result<String> {
+fn template_process_file(context: &mut Object, parser: &Parser, file: &Path) -> Result<String> {
     let content =
         fs::read_to_string(file).map_err(|e| liquid_core::Error::with_msg(e.to_string()))?;
     render_string_gracefully(context, parser, content.as_str())
 }
 
 pub fn render_string_gracefully(
-    context: &LiquidObjectResource,
+    context: &mut Object,
     parser: &Parser,
     content: &str,
-) -> liquid_core::Result<String> {
+) -> Result<String> {
     let template = parser.parse(content)?;
 
     // Liquid engine needs access to the context.
@@ -267,20 +240,14 @@ pub fn render_string_gracefully(
     // inside a rhai filter script - so we currently clone it, and let any rhai filter manipulate
     // the original. Note that hooks do not run at the same time as liquid, thus they do not
     // suffer these limitations.
-    let render_object_view = {
-        let ref_cell = context
-            .lock()
-            .map_err(|_| liquid_core::Error::with_msg(PoisonError.to_string()))?;
-        let object_view = ref_cell.borrow();
-        object_view.to_owned()
-    };
+    let render_object_view = context.clone();
     let render_result = template.render(&render_object_view);
-
     match render_result {
-        ctx @ Ok(_) => ctx,
+        liquid_core::Result::Ok(ctx) => liquid_core::Result::Ok(ctx),
         Err(e) => {
             // handle it gracefully
             let msg = e.to_string();
+            println!("render msg:{msg}");
             if msg.contains("requested variable") {
                 // so, we miss a variable that is present in the file to render
                 let requested_var =
@@ -291,9 +258,6 @@ pub fn render_string_gracefully(
                     // The missing variable might have been supplied by a rhai filter,
                     // if not, substitute an empty string before retrying
                     let _ = context
-                        .lock()
-                        .map_err(|_| liquid_core::Error::with_msg(PoisonError.to_string()))?
-                        .borrow_mut()
                         .entry(missing_variable)
                         .or_insert_with(|| Value::scalar("".to_string()));
                     return render_string_gracefully(context, parser, content);
@@ -315,21 +279,116 @@ pub fn render_string_gracefully(
     }
 }
 
-fn print_files_with_errors_warning(files_with_errors: Vec<(String, liquid_core::Error)>) -> String {
-    let mut msg = format!(
-        "{}",
-        style("Substitution skipped, found invalid syntax in\n")
-            .bold()
-            .red(),
-    );
-    for file_error in files_with_errors {
-        msg.push('\t');
-        msg.push_str(&file_error.0);
-        msg.push('\n');
-    }
-    let read_more =
-        "Learn more: https://github.com/cargo-generate/cargo-generate#include--exclude.\n\n";
-    let hint = style("Consider adding these files to a `cargo-generate.toml` in the template repo to skip substitution on these files.").bold();
+/// To get source template and put in into a temperary direction
+/// TemplateLocation: Local path or git path
+pub fn get_source_template_into_temp(template_location: &TemplateLocation) -> Result<TempDir> {
+    match template_location {
+        TemplateLocation::Git(git) => {
+            let result = git::clone_git_template_into_temp(
+                git.url(),
+                git.branch(),
+                git.tag(),
+                git.revision(),
+                git.identity(),
+                git.gitconfig(),
+                git.skip_submodules,
+            );
+            if let Result::Ok(ref temp_dir) = result {
+                git::remove_history(temp_dir.path())?;
+            };
+            result
+        }
+        TemplateLocation::Path(path) => {
+            let temp_dir = tmp_dir()?;
+            //copy_files_recursively(path, temp_dir.path(), false)?;
+            let mut file_list = fs::read_dir(path)?
+                .map(|res| res.map(|e| e.path()))
+                .collect::<Result<Vec<_>, std::io::Error>>()?;
+            // for filename in  fs::read_dir(path)?
+            //     .map(|res| res.map(|e| e.path()))
+            //     .collect::<Result<Vec<_>, std::io::Error>>()?
+            loop {
+                if file_list.is_empty() {
+                    break;
+                }
+                let filename = file_list.pop().unwrap();
+                if filename.file_name().unwrap() == ".git" {
+                    continue;
+                }
+                if filename.file_name().unwrap() == ".gitignore" {
+                    continue;
+                }
+                if filename.file_name().unwrap() == "README.md" {
+                    continue;
+                }
 
-    format!("{msg}\n{hint}\n\n{read_more}")
+                let mut dst_path = temp_dir.path().join(filename.strip_prefix(path).unwrap());
+                if filename.is_dir() {
+                    std::fs::create_dir_all(&dst_path)?;
+                    file_list.append(&mut fs::read_dir(filename)?.map(|res| res.map(|e| e.path())).collect::<Result<Vec<_>, std::io::Error>>()?);
+                    continue;
+                }
+                if !dst_path.exists() {
+                    std::fs::create_dir_all(dst_path.parent().unwrap())?;
+                }
+                if dst_path.file_name().unwrap() == "README.md.liquid" {
+                    dst_path.set_file_name("README.md");
+                }
+                std::fs::copy(filename, dst_path)?;
+            }
+            git::remove_history(temp_dir.path())?;
+            Ok(temp_dir)
+        }
+    }
+}
+
+/// resolve the template location for the actual template to expand
+pub fn resolve_template_dir(template_base_dir: &TempDir) -> Result<PathBuf> {
+    let template_dir = template_base_dir.path().to_path_buf();
+    auto_locate_template_dir(template_dir, &mut |slots| prompt_and_check_variable(slots))
+}
+
+/// look through the template folder structure and attempt to find a suitable template.
+fn auto_locate_template_dir(
+    template_base_dir: PathBuf,
+    prompt: &mut impl FnMut(&TemplateSlots) -> Result<String>,
+) -> Result<PathBuf> {
+    let config_paths = locate_template_configs(&template_base_dir)?;
+    match config_paths.len() {
+        0 => {
+            // No configurations found, so this *must* be a template
+            bail!("No template file found. Please check the template folder structure.");
+        }
+        1 => {
+            // A single configuration found, but it may contain multiple configured sub-templates
+            let template_dir = &template_base_dir.join(&config_paths[0]);
+            Ok(template_dir.to_path_buf())
+        }
+        _ => {
+            // Multiple configurations found, each in different "roots"
+            // let user select between them
+            let prompt_args = TemplateSlots {
+                prompt: "Which template should be expanded?".into(),
+                var_name: "Template".into(),
+                var_info: VarInfo::String {
+                    entry: Box::new(StringEntry {
+                        default: Some(config_paths[0].display().to_string()),
+                        kind: StringKind::Choices(
+                            config_paths
+                                .into_iter()
+                                .map(|p| p.display().to_string())
+                                .collect(),
+                        ),
+                        regex: None,
+                    }),
+                },
+            };
+            let path = prompt(&prompt_args)?;
+
+            // recursively retry to resolve the template,
+            // until we hit a single or no config, idetifying the final template folder
+            let template_dir = &template_base_dir.join(path);
+            Ok(template_dir.to_path_buf())
+        }
+    }
 }

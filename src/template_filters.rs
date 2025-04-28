@@ -1,5 +1,6 @@
 #![allow(clippy::box_default)]
 
+//use git2::Object;
 use ::liquid_core::error::Error;
 use anyhow::Result;
 use console::style;
@@ -8,18 +9,13 @@ use heck::{
     ToTitleCase, ToUpperCamelCase,
 };
 use liquid::model;
+use liquid_core::Object;
 use liquid_core::{parser::FilterArguments, Filter, ParseFilter, Runtime, Value, ValueView};
 use liquid_derive::FilterReflection;
 use log::warn;
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::path::PathBuf;
 
-use crate::{
-    hooks::{create_rhai_engine, PoisonError, RhaiHooksContext},
-    template::LiquidObjectResource,
-};
+use crate::hooks::{context::RhaiHooksContext, create_rhai_engine};
 
 macro_rules! create_case_filter {
     ($name:literal, $kebab_name:ident, $expr:expr) => {
@@ -76,26 +72,23 @@ create_case_filter!("upper_camel_case", UpperCamelCase, |i: String| i
 )]
 pub struct RhaiFilterParser {
     template_dir: PathBuf,
-    liquid_object: LiquidObjectResource,
+    liquid_object: Object,
     allow_commands: bool,
     silent: bool,
-    rhai_filter_files: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 impl RhaiFilterParser {
     pub const fn new(
         template_dir: PathBuf,
-        liquid_object: LiquidObjectResource,
+        liquid_object: Object,
         allow_commands: bool,
         silent: bool,
-        rhai_filter_files: Arc<Mutex<Vec<PathBuf>>>,
     ) -> Self {
         Self {
             template_dir,
             liquid_object,
             allow_commands,
             silent,
-            rhai_filter_files,
         }
     }
 }
@@ -117,7 +110,7 @@ impl ParseFilter for RhaiFilterParser {
             liquid_object: self.liquid_object.clone(),
             allow_commands: self.allow_commands,
             silent: self.silent,
-            rhai_filter_files: self.rhai_filter_files.clone(),
+            //            rhai_filter_files: self.rhai_filter_files.clone(),
         }))
     }
 
@@ -130,10 +123,10 @@ impl ParseFilter for RhaiFilterParser {
 #[name = "rhai"]
 struct RhaiFilter {
     template_dir: PathBuf,
-    liquid_object: LiquidObjectResource,
+    liquid_object: Object,
     allow_commands: bool,
     silent: bool,
-    rhai_filter_files: Arc<Mutex<Vec<PathBuf>>>,
+    //    rhai_filter_files: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 impl Filter for RhaiFilter {
@@ -145,7 +138,7 @@ impl Filter for RhaiFilter {
         // Unfortunately, liquid filters can't really cause liquid to fail. It just leaves the
         // substitution as is - thus we resort to displaying warnings to the user.
         let context = RhaiHooksContext {
-            liquid_object: Arc::clone(&self.liquid_object),
+            liquid_object: self.liquid_object.clone(),
             allow_commands: self.allow_commands,
             silent: self.silent,
             working_directory: self.template_dir.clone(),
@@ -166,10 +159,6 @@ impl Filter for RhaiFilter {
                 file_path.display()
             )));
         }
-        self.rhai_filter_files
-            .lock()
-            .map_err(|_| liquid_core::Error::with_msg(PoisonError.to_string()))?
-            .push(file_path.clone());
 
         let result = engine.eval_file::<String>(file_path.clone());
         match result {

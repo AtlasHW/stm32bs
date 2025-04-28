@@ -63,20 +63,17 @@ fn run_command(
             let prompt = format!("The template is requesting to run the following command. Do you agree?\n{full_command}");
 
             // Prompt the user for whether they actually want to run the command.
-            let value = prompt_and_check_variable(
-                &TemplateSlots {
-                    prompt: prompt.into(),
-                    var_name: "".into(),
-                    var_info: VarInfo::String {
-                        entry: Box::new(StringEntry {
-                            default: Some("no".into()),
-                            kind: StringKind::Choices(vec!["yes".into(), "no".into()]),
-                            regex: None,
-                        }),
-                    },
+            let value = prompt_and_check_variable(&TemplateSlots {
+                prompt: prompt.into(),
+                var_name: "".into(),
+                var_info: VarInfo::String {
+                    entry: Box::new(StringEntry {
+                        default: Some("no".into()),
+                        kind: StringKind::Choices(vec!["yes".into(), "no".into()]),
+                        regex: None,
+                    }),
                 },
-                None,
-            );
+            });
 
             // Only accept clearly positive affirmations.
             matches!(
@@ -155,10 +152,8 @@ fn construct_date_map(dt: OffsetDateTime) -> Dynamic {
 mod tests {
     use std::io::Write;
 
-    use crate::{
-        hooks::{create_rhai_engine, RhaiHooksContext},
-        template::LiquidObjectResource,
-    };
+    use crate::hooks::{create_rhai_engine, RhaiHooksContext};
+    use liquid_core::Object;
     use rhai::Engine;
     use tempfile::TempDir;
 
@@ -170,7 +165,7 @@ mod tests {
         let context = RhaiHooksContext {
             working_directory: tmp_dir.path().to_path_buf(),
             destination_directory: tmp_dir.path().join("destination").to_path_buf(),
-            liquid_object: LiquidObjectResource::default(),
+            liquid_object: Object::default(),
             allow_commands: true,
             silent: true,
         };
@@ -220,7 +215,7 @@ mod tests {
         let context = RhaiHooksContext {
             working_directory: tmp_dir.path().to_path_buf(),
             destination_directory: tmp_dir.path().join("destination").to_path_buf(),
-            liquid_object: LiquidObjectResource::default(),
+            liquid_object: Object::default(),
             allow_commands: true,
             silent: true,
         };
@@ -241,7 +236,7 @@ mod tests {
         let context = RhaiHooksContext {
             working_directory: tmp_dir.path().to_path_buf(),
             destination_directory: tmp_dir.path().join("destination").to_path_buf(),
-            liquid_object: LiquidObjectResource::default(),
+            liquid_object: Object::default(),
             allow_commands: false,
             silent: true,
         };

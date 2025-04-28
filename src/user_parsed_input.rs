@@ -8,74 +8,31 @@ use std::{
 
 use crate::absolute_path::AbsolutePathExt;
 use console::style;
-use regex::Regex;
 
-use crate::{app_config::AppConfig, template_variables::CrateType, GenerateArgs, Vcs};
+use crate::AppArgs;
 use log::warn;
-
-#[derive(Debug)]
-#[cfg(test)]
-pub struct UserParsedInputBuilder {
-    subject: UserParsedInput,
-}
-
-#[cfg(test)]
-impl UserParsedInputBuilder {
-    #[cfg(test)]
-    pub(crate) fn for_testing() -> Self {
-        use crate::TemplatePath;
-        Self {
-            subject: UserParsedInput::try_from_args_and_config(
-                AppConfig::default(),
-                &GenerateArgs {
-                    destination: Some(Path::new("/tmp/dest/").to_path_buf()),
-                    template_path: TemplatePath {
-                        path: Some("/tmp".to_string()),
-                        ..TemplatePath::default()
-                    },
-                    ..GenerateArgs::default()
-                },
-            ),
-        }
-    }
-
-    pub const fn with_force(mut self) -> Self {
-        self.subject.force = true;
-        self
-    }
-
-    pub fn build(self) -> UserParsedInput {
-        self.subject
-    }
-}
 
 // Contains parsed information from user.
 #[derive(Debug)]
 pub struct UserParsedInput {
     name: Option<String>,
+    chip_pn: Option<String>,
 
     // from where clone or copy template?
     template_location: TemplateLocation,
 
     destination: PathBuf,
 
-    // if template_location contains many templates user already specified one
-    subfolder: Option<String>,
     // all values that user defined through:
     // 1. environment variables
     // 2. configuration file
     // 3. cli arguments --define
     template_values: HashMap<String, toml::Value>,
 
-    vcs: Vcs,
-    pub init: bool,
     overwrite: bool,
-    crate_type: CrateType,
     allow_commands: bool,
     silent: bool,
-    force: bool,
-    test: bool,
-    force_git_init: bool,
+    verbose: bool,
     //TODO:
     // 1. This structure should be used instead of args
     // 2. This struct can contains internally args and app_config to not confuse
@@ -83,14 +40,12 @@ pub struct UserParsedInput {
 }
 
 impl UserParsedInput {
-    /// Try create `UserParsedInput` reading in order [`AppConfig`] and [`Args`]
+    /// Try create `UserParsedInput` reading in order \[`AppConfig`\] and \[`Args`\]
     ///
     /// # Panics
     /// This function assume that Args and AppConfig are verified earlier and are logically correct
     /// For example if both `--git` and `--path` are set this function will panic
-    pub fn try_from_args_and_config(app_config: AppConfig, args: &GenerateArgs) -> Self {
-        const DEFAULT_VCS: Vcs = Vcs::Git;
-
+    pub fn try_from_args(args: &AppArgs) -> Self {
         let destination = args
             .destination
             .as_ref()
@@ -101,20 +56,14 @@ impl UserParsedInput {
             })
             .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| ".".into()));
 
-        let mut default_values = app_config.values.clone().unwrap_or_default();
+        let mut default_values = HashMap::new();
+        for item in args.define.iter() {
+            if let Some((k, v)) = item.split_once('=') {
+                default_values.insert(k.to_string(), toml::Value::String(v.to_string()));
+            }
+        }
 
-        let ssh_identity = app_config
-            .defaults
-            .as_ref()
-            .and_then(|dcfg| dcfg.ssh_identity.clone())
-            .or_else(|| {
-                args.ssh_identity.as_ref().cloned().or_else(|| {
-                    app_config
-                        .defaults
-                        .as_ref()
-                        .and_then(|defaults| defaults.ssh_identity.clone())
-                })
-            });
+        let ssh_identity = None;
 
         // --git
         if let Some(git_url) = args.template_path.git() {
@@ -125,27 +74,18 @@ impl UserParsedInput {
                 args.template_path.revision(),
                 ssh_identity,
                 args.gitconfig.clone(),
-                args.force_git_init,
                 args.skip_submodules,
             );
             return Self {
                 name: args.name.clone(),
+                chip_pn: args.chip_pn.clone(),
                 template_location: git_user_in.into(),
-                subfolder: args
-                    .template_path
-                    .subfolder()
-                    .map(|s| s.as_ref().to_owned()),
                 template_values: default_values,
-                vcs: args.vcs.unwrap_or(DEFAULT_VCS),
-                init: args.init,
                 overwrite: args.overwrite,
-                crate_type: CrateType::from(args),
                 allow_commands: args.allow_commands,
                 silent: args.silent,
+                verbose: args.verbose,
                 destination,
-                force: args.force,
-                test: args.template_path.test,
-                force_git_init: args.force_git_init,
             };
         }
 
@@ -153,129 +93,41 @@ impl UserParsedInput {
         if let Some(path) = args.template_path.path() {
             return Self {
                 name: args.name.clone(),
+                chip_pn: args.chip_pn.clone(),
                 template_location: path.as_ref().into(),
-                subfolder: args
-                    .template_path
-                    .subfolder()
-                    .map(|s| s.as_ref().to_owned()),
                 template_values: default_values,
-                vcs: args.vcs.unwrap_or(DEFAULT_VCS),
-                init: args.init,
                 overwrite: args.overwrite,
-                crate_type: CrateType::from(args),
                 allow_commands: args.allow_commands,
                 silent: args.silent,
+                verbose: args.verbose,
                 destination,
-                force: args.force,
-                test: args.template_path.test,
-                force_git_init: args.force_git_init,
             };
         }
 
-        // check if favorite is favorite configuration
-        let fav_name = args.template_path.any_path();
-
-        if let Some(fav_cfg) = app_config.get_favorite_cfg(fav_name) {
-            assert!(fav_cfg.git.is_none() || fav_cfg.path.is_none());
-
-            let temp_location = fav_cfg.git.as_ref().map_or_else(
-                || fav_cfg.path.as_ref().map(TemplateLocation::from).unwrap(),
-                |git_url| {
-                    let branch = args
-                        .template_path
-                        .branch()
-                        .map(|s| s.as_ref().to_owned())
-                        .or_else(|| fav_cfg.branch.clone());
-                    let tag = args
-                        .template_path
-                        .tag()
-                        .map(|s| s.as_ref().to_owned())
-                        .or_else(|| fav_cfg.tag.clone());
-                    let revision = args
-                        .template_path
-                        .revision()
-                        .map(|s| s.as_ref().to_owned())
-                        .or_else(|| fav_cfg.revision.clone());
-                    let git_user_input = GitUserInput::new(
-                        git_url,
-                        branch.as_ref(),
-                        tag.as_ref(),
-                        revision.as_ref(),
-                        ssh_identity,
-                        None,
-                        args.force_git_init,
-                        args.skip_submodules,
-                    );
-
-                    TemplateLocation::from(git_user_input)
-                },
-            );
-
-            if let Some(fav_default_values) = &fav_cfg.values {
-                default_values.extend(fav_default_values.clone());
-            }
-
-            return Self {
-                name: args.name.clone(),
-                template_location: temp_location,
-                subfolder: args
-                    .template_path
-                    .subfolder()
-                    .map(|s| s.as_ref().to_owned())
-                    .or_else(|| fav_cfg.subfolder.clone()),
-                template_values: default_values,
-                vcs: args.vcs.or(fav_cfg.vcs).unwrap_or(DEFAULT_VCS),
-                init: args
-                    .init
-                    .then_some(true)
-                    .or(fav_cfg.init)
-                    .unwrap_or_default(),
-                overwrite: args
-                    .overwrite
-                    .then_some(true)
-                    .or(fav_cfg.overwrite)
-                    .unwrap_or_default(),
-                crate_type: CrateType::from(args),
-                allow_commands: args.allow_commands,
-                silent: args.silent,
-                destination,
-                force: args.force,
-                test: args.template_path.test,
-                force_git_init: args.force_git_init,
-            };
-        }
+        // If auto path is inputed, to check git short, local path and git full path
+        let any_path = args.template_path.any_path();
 
         // there is no specified favorite in configuration
         // this part try to guess what user wanted in order:
-
         // 1. look for abbreviations like gh:, gl: etc.
-        let temp_location = abbreviated_git_url_to_full_remote(fav_name).map(|git_url| {
+        let temp_location = abbreviated_git_url_to_full_remote(any_path).map(|git_url| {
             let git_user_in = GitUserInput::with_git_url_and_args(&git_url, args);
             TemplateLocation::from(git_user_in)
         });
 
         // 2. check if template directory exist
         let temp_location =
-            temp_location.or_else(|| local_path(fav_name).map(TemplateLocation::from));
+            temp_location.or_else(|| local_path(any_path).map(TemplateLocation::from));
 
-        // 3. check if the input is in form org/repo<> (map to github)
-        let temp_location = temp_location.or_else(|| {
-            abbreviated_github(fav_name).map(|git_url| {
-                let git_user_in = GitUserInput::with_git_url_and_args(&git_url, args);
-                TemplateLocation::from(git_user_in)
-            })
-        });
-
-        // 4. assume user wanted use --git
+        // 3. assume user wanted use --git
         let temp_location = temp_location.unwrap_or_else(|| {
             let git_user_in = GitUserInput::new(
-                &fav_name,
+                &any_path,
                 args.template_path.branch(),
                 args.template_path.tag(),
                 args.template_path.revision(),
                 ssh_identity,
                 args.gitconfig.clone(),
-                args.force_git_init,
                 args.skip_submodules,
             );
             TemplateLocation::from(git_user_in)
@@ -291,29 +143,21 @@ impl UserParsedInput {
             }
         };
         warn!(
-            "Favorite `{}` not found in config, using it as a {}",
-            style(&fav_name).bold(),
+            "Auto path `{}` detected, trying it as a {}",
+            style(&any_path).bold(),
             location_msg
         );
 
         Self {
             name: args.name.clone(),
+            chip_pn: args.chip_pn.clone(),
             template_location: temp_location,
-            subfolder: args
-                .template_path
-                .subfolder()
-                .map(|s| s.as_ref().to_owned()),
             template_values: default_values,
-            vcs: args.vcs.unwrap_or(DEFAULT_VCS),
-            init: args.init,
             overwrite: args.overwrite,
-            crate_type: CrateType::from(args),
             allow_commands: args.allow_commands,
             silent: args.silent,
+            verbose: args.verbose,
             destination,
-            force: args.force,
-            test: args.template_path.test,
-            force_git_init: args.force_git_init,
         }
     }
 
@@ -321,36 +165,20 @@ impl UserParsedInput {
         self.name.as_deref()
     }
 
-    pub const fn location(&self) -> &TemplateLocation {
-        &self.template_location
+    pub fn chip_pn(&self) -> Option<&str> {
+        self.chip_pn.as_deref()
     }
 
-    pub fn subfolder(&self) -> Option<&str> {
-        self.subfolder.as_deref()
+    pub const fn location(&self) -> &TemplateLocation {
+        &self.template_location
     }
 
     pub const fn template_values(&self) -> &HashMap<String, toml::Value> {
         &self.template_values
     }
 
-    pub const fn template_values_mut(&mut self) -> &mut HashMap<String, toml::Value> {
-        &mut self.template_values
-    }
-
-    pub const fn vcs(&self) -> Vcs {
-        self.vcs
-    }
-
-    pub const fn init(&self) -> bool {
-        self.init
-    }
-
     pub const fn overwrite(&self) -> bool {
         self.overwrite
-    }
-
-    pub const fn crate_type(&self) -> CrateType {
-        self.crate_type
     }
 
     pub const fn allow_commands(&self) -> bool {
@@ -361,20 +189,12 @@ impl UserParsedInput {
         self.silent
     }
 
+    pub const fn is_verbose(&self) -> bool {
+        self.verbose
+    }
+
     pub fn destination(&self) -> &Path {
         self.destination.as_path()
-    }
-
-    pub const fn force(&self) -> bool {
-        self.force
-    }
-
-    pub const fn test(&self) -> bool {
-        self.test
-    }
-
-    pub const fn force_git_init(&self) -> bool {
-        self.force_git_init
     }
 }
 
@@ -388,24 +208,11 @@ pub fn abbreviated_git_url_to_full_remote(git: impl AsRef<str>) -> Option<String
             "bb:" => Some(format!("https://bitbucket.org/{}.git", &git[3..])),
             "gh:" => Some(format!("https://github.com/{}.git", &git[3..])),
             "sr:" => Some(format!("https://git.sr.ht/~{}", &git[3..])),
-            short_cut_maybe if is_abbreviated_github(short_cut_maybe) => {
-                Some(format!("https://github.com/{short_cut_maybe}.git"))
-            }
             _ => None,
         }
     } else {
         None
     }
-}
-
-fn is_abbreviated_github(fav: &str) -> bool {
-    let org_repo_regex = Regex::new(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_%-]+$").unwrap();
-    org_repo_regex.is_match(fav)
-}
-
-// favorite can be in form of org/repo what should be parsed as github.com
-pub fn abbreviated_github(fav: &str) -> Option<String> {
-    is_abbreviated_github(fav).then(|| format!("https://github.com/{fav}.git"))
 }
 
 pub fn local_path(fav: &str) -> Option<PathBuf> {
@@ -422,7 +229,6 @@ pub struct GitUserInput {
     revision: Option<String>,
     identity: Option<PathBuf>,
     gitconfig: Option<PathBuf>,
-    _force_init: bool,
     pub skip_submodules: bool,
 }
 
@@ -435,7 +241,6 @@ impl GitUserInput {
         revision: Option<&impl AsRef<str>>,
         identity: Option<PathBuf>,
         gitconfig: Option<PathBuf>,
-        force_init: bool,
         skip_submodules: bool,
     ) -> Self {
         Self {
@@ -445,13 +250,12 @@ impl GitUserInput {
             revision: revision.map(|s| s.as_ref().to_owned()),
             identity,
             gitconfig,
-            _force_init: force_init,
             skip_submodules,
         }
     }
 
     // when git was used as abbreviation but other flags still could be passed
-    fn with_git_url_and_args(url: &impl AsRef<str>, args: &GenerateArgs) -> Self {
+    fn with_git_url_and_args(url: &impl AsRef<str>, args: &AppArgs) -> Self {
         Self::new(
             url,
             args.template_path.branch(),
@@ -459,7 +263,6 @@ impl GitUserInput {
             args.template_path.revision(),
             args.ssh_identity.clone(),
             args.gitconfig.clone(),
-            args.force_git_init,
             args.skip_submodules,
         )
     }
@@ -508,40 +311,5 @@ where
 {
     fn from(source: T) -> Self {
         Self::Path(PathBuf::from(source.as_ref()))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn should_support_colon_abbreviations() {
-        assert_eq!(
-            &abbreviated_git_url_to_full_remote("gh:foo/bar").unwrap(),
-            "https://github.com/foo/bar.git"
-        );
-        assert_eq!(
-            &abbreviated_git_url_to_full_remote("bb:foo/bar").unwrap(),
-            "https://bitbucket.org/foo/bar.git"
-        );
-        assert_eq!(
-            &abbreviated_git_url_to_full_remote("gl:foo/bar").unwrap(),
-            "https://gitlab.com/foo/bar.git"
-        );
-        assert_eq!(
-            &abbreviated_git_url_to_full_remote("sr:foo/bar").unwrap(),
-            "https://git.sr.ht/~foo/bar"
-        );
-        assert!(&abbreviated_git_url_to_full_remote("foo/bar").is_none());
-    }
-
-    #[test]
-    fn should_appreviation_org_repo_to_github() {
-        assert_eq!(
-            &abbreviated_github("org/repo").unwrap(),
-            "https://github.com/org/repo.git"
-        );
-        assert!(&abbreviated_github("path/to/a/sth").is_none());
     }
 }

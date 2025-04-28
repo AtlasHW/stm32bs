@@ -7,8 +7,6 @@ use console::style;
 use git2::{build::RepoBuilder, Config, FetchOptions, ProxyOptions, Repository};
 use log::debug;
 
-use crate::emoji::WRENCH;
-
 use super::gitconfig;
 use super::gitconfig::find_gitconfig;
 use super::utils;
@@ -59,10 +57,7 @@ impl<'cb> RepoCloneBuilder<'cb> {
             self.gitconfig = Some(Config::open(gitconfig.as_path())?);
 
             if let Some(url) = gitconfig::resolve_instead_url(&self.url, gitconfig)? {
-                debug!(
-                    "{} gitconfig 'insteadOf' lead to this url: {}",
-                    &WRENCH, url
-                );
+                debug!("🔧 gitconfig 'insteadOf' lead to this url: {}", url);
                 self.url = url;
             }
         }

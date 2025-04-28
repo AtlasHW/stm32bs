@@ -1,21 +1,30 @@
 use liquid::ValueView;
+use liquid_core::Object;
 use liquid_core::Value;
 use regex::Regex;
 use rhai::{Array, Dynamic, Module};
+use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
 use crate::interactive::prompt_and_check_variable;
 use crate::project_variables::{StringEntry, StringKind, TemplateSlots, VarInfo};
-use crate::template::LiquidObjectResource;
 
-use super::{HookResult, PoisonError};
+use super::HookResult;
 
-pub fn create_module(liquid_object: &LiquidObjectResource) -> Module {
+pub fn create_module(liquid_object: &Object) -> Module {
     let mut module = Module::new();
+    let liquid_object = Arc::new(Mutex::new(RefCell::new(liquid_object.clone())));
 
     module.set_native_fn("is_set", {
         let liquid_object = liquid_object.clone();
         move |name: &str| -> HookResult<bool> {
-            match liquid_object.get_value(name)? {
+            match liquid_object
+                .lock()
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .get_value(name)?
+            {
                 NamedValue::NonExistent => Ok(false),
                 _ => Ok(true),
             }
@@ -25,7 +34,13 @@ pub fn create_module(liquid_object: &LiquidObjectResource) -> Module {
     module.set_native_fn("get", {
         let liquid_object = liquid_object.clone();
         move |name: &str| -> HookResult<Dynamic> {
-            match liquid_object.get_value(name)? {
+            match liquid_object
+                .lock()
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .get_value(name)?
+            {
                 NamedValue::NonExistent => Ok(Dynamic::from(String::from(""))),
                 NamedValue::Bool(v) => Ok(Dynamic::from(v)),
                 NamedValue::String(v) => Ok(Dynamic::from(v)),
@@ -36,16 +51,14 @@ pub fn create_module(liquid_object: &LiquidObjectResource) -> Module {
     module.set_native_fn("set", {
         let liquid_object = liquid_object.clone();
         move |name: &str, value: &str| -> HookResult<()> {
+            let binding = liquid_object.lock();
+            let mut liquid_object = binding.as_ref().unwrap().borrow_mut();
             match liquid_object.get_value(name)? {
                 NamedValue::NonExistent | NamedValue::String(_) => {
-                    liquid_object
-                        .lock()
-                        .map_err(|_| PoisonError::new_eval_alt_result())?
-                        .borrow_mut()
-                        .insert(
-                            name.to_string().into(),
-                            Value::Scalar(value.to_string().into()),
-                        );
+                    liquid_object.insert(
+                        name.to_string().into(),
+                        Value::Scalar(value.to_string().into()),
+                    );
                     Ok(())
                 }
                 _ => Err(format!("Variable {name} not a String").into()),
@@ -56,13 +69,11 @@ pub fn create_module(liquid_object: &LiquidObjectResource) -> Module {
     module.set_native_fn("set", {
         let liquid_object = liquid_object.clone();
         move |name: &str, value: bool| -> HookResult<()> {
+            let binding = liquid_object.lock();
+            let mut liquid_object = binding.as_ref().unwrap().borrow_mut();
             match liquid_object.get_value(name)? {
                 NamedValue::NonExistent | NamedValue::Bool(_) => {
-                    liquid_object
-                        .lock()
-                        .map_err(|_| PoisonError::new_eval_alt_result())?
-                        .borrow_mut()
-                        .insert(name.to_string().into(), Value::Scalar(value.into()));
+                    liquid_object.insert(name.to_string().into(), Value::Scalar(value.into()));
                     Ok(())
                 }
                 _ => Err(format!("Variable {name} not a bool").into()),
@@ -73,14 +84,12 @@ pub fn create_module(liquid_object: &LiquidObjectResource) -> Module {
     module.set_native_fn("set", {
         let liquid_object = liquid_object.clone();
         move |name: &str, value: Array| -> HookResult<()> {
+            let binding = liquid_object.lock();
+            let mut liquid_object = binding.as_ref().unwrap().borrow_mut();
             match liquid_object.get_value(name)? {
                 NamedValue::NonExistent => {
                     let val = rhai_to_liquid_value(Dynamic::from(value))?;
-                    liquid_object
-                        .lock()
-                        .map_err(|_| PoisonError::new_eval_alt_result())?
-                        .borrow_mut()
-                        .insert(name.to_string().into(), val);
+                    liquid_object.insert(name.to_string().into(), val);
                     Ok(())
                 }
                 _ => Err(format!("Variable {name} not an array").into()),
@@ -90,16 +99,13 @@ pub fn create_module(liquid_object: &LiquidObjectResource) -> Module {
 
     module.set_native_fn("prompt", {
         move |prompt: &str, default_value: bool| -> HookResult<bool> {
-            let value = prompt_and_check_variable(
-                &TemplateSlots {
-                    prompt: prompt.into(),
-                    var_name: "".into(),
-                    var_info: VarInfo::Bool {
-                        default: Some(default_value),
-                    },
+            let value = prompt_and_check_variable(&TemplateSlots {
+                prompt: prompt.into(),
+                var_name: "".into(),
+                var_info: VarInfo::Bool {
+                    default: Some(default_value),
                 },
-                None,
-            );
+            });
 
             match value {
                 Ok(v) => Ok(v.parse::<bool>().map_err(|_| "Unable to parse into bool")?),
@@ -110,20 +116,17 @@ pub fn create_module(liquid_object: &LiquidObjectResource) -> Module {
 
     module.set_native_fn("prompt", {
         move |prompt: &str| -> HookResult<String> {
-            let value = prompt_and_check_variable(
-                &TemplateSlots {
-                    prompt: prompt.into(),
-                    var_name: "".into(),
-                    var_info: VarInfo::String {
-                        entry: Box::new(StringEntry {
-                            default: None,
-                            kind: StringKind::String,
-                            regex: None,
-                        }),
-                    },
+            let value = prompt_and_check_variable(&TemplateSlots {
+                prompt: prompt.into(),
+                var_name: "".into(),
+                var_info: VarInfo::String {
+                    entry: Box::new(StringEntry {
+                        default: None,
+                        kind: StringKind::String,
+                        regex: None,
+                    }),
                 },
-                None,
-            );
+            });
 
             match value {
                 Ok(v) => Ok(v),
@@ -134,20 +137,17 @@ pub fn create_module(liquid_object: &LiquidObjectResource) -> Module {
 
     module.set_native_fn("prompt", {
         move |prompt: &str, default_value: &str| -> HookResult<String> {
-            let value = prompt_and_check_variable(
-                &TemplateSlots {
-                    prompt: prompt.into(),
-                    var_name: "".into(),
-                    var_info: VarInfo::String {
-                        entry: Box::new(StringEntry {
-                            default: Some(default_value.into()),
-                            kind: StringKind::String,
-                            regex: None,
-                        }),
-                    },
+            let value = prompt_and_check_variable(&TemplateSlots {
+                prompt: prompt.into(),
+                var_name: "".into(),
+                var_info: VarInfo::String {
+                    entry: Box::new(StringEntry {
+                        default: Some(default_value.into()),
+                        kind: StringKind::String,
+                        regex: None,
+                    }),
                 },
-                None,
-            );
+            });
 
             match value {
                 Ok(v) => Ok(v),
@@ -158,20 +158,17 @@ pub fn create_module(liquid_object: &LiquidObjectResource) -> Module {
 
     module.set_native_fn("prompt", {
         move |prompt: &str, default_value: &str, regex: &str| -> HookResult<String> {
-            let value = prompt_and_check_variable(
-                &TemplateSlots {
-                    prompt: prompt.into(),
-                    var_name: "".into(),
-                    var_info: VarInfo::String {
-                        entry: Box::new(StringEntry {
-                            default: Some(default_value.into()),
-                            kind: StringKind::String,
-                            regex: Some(Regex::new(regex).map_err(|_| "Invalid regex")?),
-                        }),
-                    },
+            let value = prompt_and_check_variable(&TemplateSlots {
+                prompt: prompt.into(),
+                var_name: "".into(),
+                var_info: VarInfo::String {
+                    entry: Box::new(StringEntry {
+                        default: Some(default_value.into()),
+                        kind: StringKind::String,
+                        regex: Some(Regex::new(regex).map_err(|_| "Invalid regex")?),
+                    }),
                 },
-                None,
-            );
+            });
 
             match value {
                 Ok(v) => Ok(v),
@@ -182,25 +179,22 @@ pub fn create_module(liquid_object: &LiquidObjectResource) -> Module {
 
     module.set_native_fn("prompt", {
         move |prompt: &str, default_value: &str, choices: rhai::Array| -> HookResult<String> {
-            let value = prompt_and_check_variable(
-                &TemplateSlots {
-                    prompt: prompt.into(),
-                    var_name: "".into(),
-                    var_info: VarInfo::String {
-                        entry: Box::new(StringEntry {
-                            default: Some(default_value.into()),
-                            kind: StringKind::Choices(
-                                choices
-                                    .iter()
-                                    .map(|d| d.to_owned().into_string().unwrap())
-                                    .collect(),
-                            ),
-                            regex: None,
-                        }),
-                    },
+            let value = prompt_and_check_variable(&TemplateSlots {
+                prompt: prompt.into(),
+                var_name: "".into(),
+                var_info: VarInfo::String {
+                    entry: Box::new(StringEntry {
+                        default: Some(default_value.into()),
+                        kind: StringKind::Choices(
+                            choices
+                                .iter()
+                                .map(|d| d.to_owned().into_string().unwrap())
+                                .collect(),
+                        ),
+                        regex: None,
+                    }),
                 },
-                None,
-            );
+            });
 
             match value {
                 Ok(v) => Ok(v),
@@ -222,27 +216,22 @@ trait GetNamedValue {
     fn get_value(&self, name: &str) -> HookResult<NamedValue>;
 }
 
-impl GetNamedValue for LiquidObjectResource {
+impl GetNamedValue for Object {
     fn get_value(&self, name: &str) -> HookResult<NamedValue> {
-        let value = self
-            .lock()
-            .map_err(|_| PoisonError::new_eval_alt_result())?
-            .borrow()
-            .get(name)
-            .map_or(NamedValue::NonExistent, |value| {
-                value
-                    .as_scalar()
-                    .map(|scalar| {
-                        scalar.to_bool().map_or_else(
-                            || {
-                                let v = scalar.to_kstr();
-                                NamedValue::String(String::from(v.as_str()))
-                            },
-                            NamedValue::Bool,
-                        )
-                    })
-                    .unwrap_or_else(|| NamedValue::NonExistent)
-            });
+        let value = self.get(name).map_or(NamedValue::NonExistent, |value| {
+            value
+                .as_scalar()
+                .map(|scalar| {
+                    scalar.to_bool().map_or_else(
+                        || {
+                            let v = scalar.to_kstr();
+                            NamedValue::String(String::from(v.as_str()))
+                        },
+                        NamedValue::Bool,
+                    )
+                })
+                .unwrap_or_else(|| NamedValue::NonExistent)
+        });
         Ok(value)
     }
 }
@@ -273,20 +262,14 @@ fn rhai_to_liquid_value(val: Dynamic) -> HookResult<Value> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        cell::RefCell,
-        sync::{Arc, Mutex},
-    };
-
-    use liquid::Object;
-
     use super::*;
+    use liquid::Object;
 
     #[test]
     fn test_rhai_set() {
         let mut engine = rhai::Engine::new();
-        let liquid_object = Arc::new(Mutex::new(RefCell::new(Object::new())));
 
+        let liquid_object = Object::new();
         let module = create_module(&liquid_object);
         engine.register_static_module("variable", module.into());
 
@@ -299,9 +282,6 @@ mod tests {
         "#,
             )
             .unwrap();
-
-        let ref_cell = liquid_object.lock().unwrap();
-        let liquid_object = ref_cell.borrow();
 
         assert_eq!(
             liquid_object.get("dependencies"),

@@ -46,24 +46,3 @@ pub fn resolve_instead_url(
     Ok(x)
 }
 
-#[cfg(test)]
-mod test {
-    use crate::tmp_dir;
-
-    use super::*;
-
-    #[test]
-    fn should_resolve_instead_url() {
-        let sample_config = r#"
-[url "ssh://git@github.com:"]
-    insteadOf = https://github.com/
-"#;
-        let where_gitconfig_lives = tmp_dir().unwrap();
-        let gitconfig = where_gitconfig_lives.path().join(".gitconfig");
-        std::fs::write(&gitconfig, sample_config).unwrap();
-
-        // SSH, aka git@github.com: or ssh://git@github.com/
-        let x = resolve_instead_url("https://github.com/foo/bar.git", &gitconfig).unwrap();
-        assert_eq!(x.unwrap().as_str(), "ssh://git@github.com:foo/bar.git")
-    }
-}

@@ -114,10 +114,8 @@ fn invalid_path(path: &str) -> String {
 mod tests {
     use std::io::Write;
 
-    use crate::{
-        hooks::{create_rhai_engine, RhaiHooksContext},
-        template::LiquidObjectResource,
-    };
+    use crate::hooks::{create_rhai_engine, RhaiHooksContext};
+    use liquid::Object;
     use rhai::Array;
     use tempfile::TempDir;
 
@@ -224,7 +222,7 @@ mod tests {
         RhaiHooksContext {
             working_directory: tmp_dir.path().to_path_buf(),
             destination_directory: tmp_dir.path().join("destination").to_path_buf(),
-            liquid_object: LiquidObjectResource::default(),
+            liquid_object: Object::default(),
             allow_commands: true,
             silent: true,
         }

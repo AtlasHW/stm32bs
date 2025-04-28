@@ -1,13 +1,7 @@
-use std::{
-    path::{Path, PathBuf},
-    str::FromStr,
-};
+use std::path::PathBuf;
 
-use anyhow::{anyhow, Result};
 use clap::{Args, Parser};
-use serde::Deserialize;
-
-use crate::git;
+use std::env;
 
 /// Styles from <https://github.com/rust-lang/cargo/blob/master/src/cargo/util/style.rs>
 mod style {
@@ -43,7 +37,7 @@ mod heading {
 
 #[derive(Parser)]
 #[command(
-    name = "cargo generate",
+    name = "cargo stm32bs",
     bin_name = "cargo",
     arg_required_else_help(true),
     version,
@@ -52,66 +46,27 @@ mod heading {
     styles(style::STYLES)
 )]
 pub enum Cli {
-    #[command(name = "generate", visible_alias = "gen")]
-    Generate(GenerateArgs),
+    #[command(name = "stm32bs", visible_alias = "stbs")]
+    ParseArgs(AppArgs),
 }
 
 #[derive(Clone, Debug, Args)]
-#[command(arg_required_else_help(true), version, about)]
-pub struct GenerateArgs {
+#[command(arg_required_else_help(false), version, about)]
+pub struct AppArgs {
     #[command(flatten)]
     pub template_path: TemplatePath,
 
-    /// List defined favorite templates from the config
-    #[arg(
-        long,
-        action,
-        group("SpecificPath"),
-        conflicts_with_all(&[
-            "git", "path", "subfolder", "branch",
-            "name",
-            "force",
-            "silent",
-            "vcs",
-            "lib",
-            "bin",
-            "define",
-            "init",
-            "template_values_file",
-            "ssh_identity",
-            "test",
-        ])
-    )]
-    pub list_favorites: bool,
-
     /// Directory to create / project name; if the name isn't in kebab-case, it will be converted
-    /// to kebab-case unless `--force` is given.
     #[arg(long, short, value_parser, help_heading = heading::OUTPUT_PARAMETERS)]
     pub name: Option<String>,
 
-    /// Don't convert the project name to kebab-case before creating the directory. Note that cargo
-    /// generate won't overwrite an existing directory, even if `--force` is given.
-    #[arg(long, short, action, help_heading = heading::OUTPUT_PARAMETERS)]
-    pub force: bool,
+    /// The chip part number to use for the project. This is used to generate the correct
+    #[arg(long="chip", short, value_parser, help_heading = heading::OUTPUT_PARAMETERS)]
+    pub chip_pn: Option<String>,
 
     /// Enables more verbose output.
-    #[arg(long, short, action, conflicts_with = "quiet")]
+    #[arg(long, short, action)]
     pub verbose: bool,
-
-    /// Opposite of verbose, suppresses errors & warning in output
-    /// Conflicts with verbose, and requires the use of --continue-on-error
-    #[arg(
-        long,
-        short,
-        action,
-        conflicts_with = "verbose",
-        requires = "continue_on_error"
-    )]
-    pub quiet: bool,
-
-    /// Continue if errors in templates are encountered
-    #[arg(long, action)]
-    pub continue_on_error: bool,
 
     /// Pass template values through a file. Values should be in the format `key=value`, one per
     /// line
@@ -122,23 +77,6 @@ pub struct GenerateArgs {
     /// value is missing the project generation will fail
     #[arg(long, short, requires("name"), action)]
     pub silent: bool,
-
-    /// Use specific configuration file. Defaults to $CARGO_HOME/cargo-generate or
-    /// $HOME/.cargo/cargo-generate
-    #[arg(short, long, value_parser)]
-    pub config: Option<PathBuf>,
-
-    /// Specify the VCS used to initialize the generated template.
-    #[arg(long, value_parser, help_heading = heading::OUTPUT_PARAMETERS)]
-    pub vcs: Option<Vcs>,
-
-    /// Populates template variable `crate_type` with value `"lib"`
-    #[arg(long, conflicts_with = "bin", action, help_heading = heading::OUTPUT_PARAMETERS)]
-    pub lib: bool,
-
-    /// Populates a template variable `crate_type` with value `"bin"`
-    #[arg(long, conflicts_with = "lib", action, help_heading = heading::OUTPUT_PARAMETERS)]
-    pub bin: bool,
 
     /// Use a different ssh identity
     #[arg(short = 'i', long = "identity", value_parser, value_name="IDENTITY", help_heading = heading::GIT_PARAMETERS)]
@@ -152,18 +90,9 @@ pub struct GenerateArgs {
     #[arg(long, short, number_of_values = 1, value_parser, help_heading = heading::OUTPUT_PARAMETERS)]
     pub define: Vec<String>,
 
-    /// Generate the template directly into the current dir. No subfolder will be created and no vcs
-    /// is initialized.
-    #[arg(long, action, help_heading = heading::OUTPUT_PARAMETERS)]
-    pub init: bool,
-
     /// Generate the template directly at the given path.
     #[arg(long, value_parser, value_name="PATH", help_heading = heading::OUTPUT_PARAMETERS)]
     pub destination: Option<PathBuf>,
-
-    /// Will enforce a fresh git init on the generated project
-    #[arg(long, action, help_heading = heading::OUTPUT_PARAMETERS)]
-    pub force_git_init: bool,
 
     /// Allows running system commands without being prompted. Warning: Setting this flag will
     /// enable the template to run arbitrary system commands without user confirmation. Use at your
@@ -178,61 +107,34 @@ pub struct GenerateArgs {
     /// Skip downloading git submodules (if there are any)
     #[arg(long, action, help_heading = heading::GIT_PARAMETERS)]
     pub skip_submodules: bool,
-
-    /// All args after "--" on the command line.
-    #[arg(skip)]
-    pub other_args: Option<Vec<String>>,
 }
 
-impl Default for GenerateArgs {
+impl Default for AppArgs {
     fn default() -> Self {
         Self {
             template_path: TemplatePath::default(),
-            list_favorites: false,
             name: None,
-            force: false,
+            chip_pn: None,
             verbose: false,
-            quiet: false,
-            continue_on_error: false,
             template_values_file: None,
             silent: false,
-            config: None,
-            vcs: None,
-            lib: true,
-            bin: false,
             ssh_identity: None,
             gitconfig: None,
             define: Vec::default(),
-            init: false,
             destination: None,
-            force_git_init: false,
             allow_commands: false,
             overwrite: false,
             skip_submodules: false,
-            other_args: None,
         }
     }
 }
 
 #[derive(Default, Debug, Clone, Args)]
 pub struct TemplatePath {
-    /// Auto attempt to use as either `--git` or `--favorite`. If either is specified explicitly,
+    /// Auto attempt to use as `--git` or --path. If it is specified explicitly,
     /// use as subfolder.
-    #[arg(required_unless_present_any(&["SpecificPath"]))]
-    pub auto_path: Option<String>,
-
-    /// Specifies the subfolder within the template repository to be used as the actual template.
     #[arg()]
-    pub subfolder: Option<String>,
-
-    /// Expand $CWD as a template, then run `cargo test` on the expansion (set
-    /// $CARGO_GENERATE_TEST_CMD to override test command).
-    /// implies --verbose
-    ///
-    /// Any arguments given after the `--test` argument, will be used as arguments for the test
-    /// command.
-    #[arg(long, action, group("SpecificPath"))]
-    pub test: bool,
+    pub auto_path: Option<String>,
 
     /// Git repository to clone template from. Can be a URL (like
     /// `https://github.com/rust-cli/cli-template`), a path (relative or absolute), or an
@@ -240,7 +142,7 @@ pub struct TemplatePath {
     ///
     /// Note that cargo generate will first attempt to interpret the `owner/repo` form as a
     /// relative path and only try a GitHub URL if the local path doesn't exist.
-    #[arg(short, long, group("SpecificPath"), help_heading = heading::TEMPLATE_SELECTION)]
+    #[arg(short, long, help_heading = heading::TEMPLATE_SELECTION)]
     pub git: Option<String>,
 
     /// Branch to use when installing from git
@@ -256,13 +158,8 @@ pub struct TemplatePath {
     pub revision: Option<String>,
 
     /// Local path to copy the template from. Can not be specified together with --git.
-    #[arg(short, long, group("SpecificPath"), help_heading = heading::TEMPLATE_SELECTION)]
+    #[arg(short, long, help_heading = heading::TEMPLATE_SELECTION)]
     pub path: Option<String>,
-
-    /// Generate a favorite template as defined in the config. In case the favorite is undefined,
-    /// use in place of the `--git` option, otherwise specifies the subfolder
-    #[arg(long, group("SpecificPath"), help_heading = heading::TEMPLATE_SELECTION)]
-    pub favorite: Option<String>,
 }
 
 impl TemplatePath {
@@ -273,9 +170,22 @@ impl TemplatePath {
         self.git
             .as_ref()
             .or(self.path.as_ref())
-            .or(self.favorite.as_ref())
             .or(self.auto_path.as_ref())
             .unwrap()
+    }
+
+    /// Check exist an auto path or git path or local path
+    pub fn have_any_path(&self) -> bool {
+        if self.auto_path != None {
+            return true;
+        }
+        if self.git != None {
+            return true;
+        }
+        if self.path != None {
+            return true;
+        }
+        false
     }
 
     pub const fn git(&self) -> Option<&(impl AsRef<str> + '_)> {
@@ -298,54 +208,17 @@ impl TemplatePath {
         self.path.as_ref()
     }
 
-    pub const fn favorite(&self) -> Option<&(impl AsRef<str> + '_)> {
-        self.favorite.as_ref()
-    }
-
     pub const fn auto_path(&self) -> Option<&(impl AsRef<str> + '_)> {
         self.auto_path.as_ref()
     }
-
-    pub const fn subfolder(&self) -> Option<&(impl AsRef<str> + '_)> {
-        if self.git.is_some() || self.path.is_some() || self.favorite.is_some() {
-            self.auto_path.as_ref()
-        } else {
-            self.subfolder.as_ref()
-        }
-    }
 }
 
-#[derive(Debug, Parser, Clone, Copy, PartialEq, Eq, Deserialize)]
-pub enum Vcs {
-    None,
-    Git,
-}
-
-impl FromStr for Vcs {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_uppercase().as_str() {
-            "NONE" => Ok(Self::None),
-            "GIT" => Ok(Self::Git),
-            _ => Err(anyhow!("Must be one of 'git' or 'none'")),
-        }
-    }
-}
-
-impl Vcs {
-    pub fn initialize(&self, project_dir: &Path, branch: Option<&str>, force: bool) -> Result<()> {
-        match self {
-            Self::None => Ok(()),
-            Self::Git => git::init(project_dir, branch, force)
-                .map(|_| ())
-                .map_err(anyhow::Error::from),
-        }
-    }
-
-    pub const fn is_none(&self) -> bool {
-        matches!(self, Self::None)
-    }
+/// To get the arguments list from terminal
+/// Return : work arguments
+pub fn resolve_args() -> AppArgs {
+    let args = env::args();
+    let Cli::ParseArgs(args) = Cli::parse_from(args);
+    args
 }
 
 #[cfg(test)]

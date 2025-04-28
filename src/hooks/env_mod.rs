@@ -28,10 +28,8 @@ pub fn create_module(env: Environment) -> Module {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        hooks::{create_rhai_engine, RhaiHooksContext},
-        template::LiquidObjectResource,
-    };
+    use crate::hooks::{create_rhai_engine, RhaiHooksContext};
+    use liquid_core::Object;
     use tempfile::TempDir;
 
     #[test]
@@ -40,7 +38,7 @@ mod tests {
         let context = RhaiHooksContext {
             working_directory: tmp_dir.path().to_path_buf(),
             destination_directory: tmp_dir.path().join("destination").to_path_buf(),
-            liquid_object: LiquidObjectResource::default(),
+            liquid_object: Object::default(),
             allow_commands: true,
             silent: true,
         };

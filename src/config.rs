@@ -6,9 +6,7 @@ use std::path::{Path, PathBuf};
 use std::{collections::HashMap, fs};
 use std::{convert::TryFrom, io::ErrorKind};
 
-use crate::Vcs;
-
-pub const CONFIG_FILE_NAME: &str = "cargo-generate.toml";
+pub const CONFIG_FILE_NAME: &str = "stm32bs.toml";
 
 #[derive(Deserialize, Debug, PartialEq, Default, Clone)]
 pub struct Config {
@@ -16,6 +14,7 @@ pub struct Config {
     pub placeholders: Option<TemplateSlotsTable>,
     pub hooks: Option<HooksConfig>,
     pub conditional: Option<HashMap<String, ConditionalConfig>>,
+    pub demo: Option<HashMap<String, IndexMap<String, toml::Value>>>,
 }
 
 #[derive(Deserialize, Debug, PartialEq, Eq, Default, Clone)]
@@ -27,21 +26,13 @@ pub struct HooksConfig {
 
 #[derive(Deserialize, Debug, PartialEq, Eq, Default, Clone)]
 pub struct TemplateConfig {
-    pub sub_templates: Option<Vec<String>>,
-
     pub cargo_generate_version: Option<VersionReq>,
     pub include: Option<Vec<String>>,
-    pub exclude: Option<Vec<String>>,
-    pub ignore: Option<Vec<String>>,
-    pub vcs: Option<Vcs>,
-    pub init: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, PartialEq, Clone)]
 pub struct ConditionalConfig {
     pub include: Option<Vec<String>>,
-    pub exclude: Option<Vec<String>>,
-    pub ignore: Option<Vec<String>>,
     pub placeholders: Option<TemplateSlotsTable>,
 }
 
@@ -94,16 +85,19 @@ impl Config {
             .unwrap_or_default()
     }
 
-    pub fn get_hook_files(&self) -> Vec<String> {
-        let mut pre = self.get_init_hooks();
-        pre.append(&mut self.get_pre_hooks());
-        pre.append(&mut self.get_post_hooks());
-        pre
+    pub fn get_demo_list(&self) -> Vec<String> {
+        self.demo
+            .as_ref()
+            .map(|d| d.keys().cloned().collect())
+            .unwrap_or_default()
     }
 }
 
 /// Search through a folder structure for template configuration files, but look no deeper than
 /// a found file!
+/// return: none: No configuration file
+///         "": Configuration file in base direction
+///         _ : Table of directions that include configuration file
 pub fn locate_template_configs(base_dir: &Path) -> Result<Vec<PathBuf>> {
     let mut results = Vec::with_capacity(1);
 
@@ -126,60 +120,19 @@ pub fn locate_template_configs(base_dir: &Path) -> Result<Vec<PathBuf>> {
     } else {
         results.push(base_dir.to_path_buf());
     }
-
     results.sort();
     Ok(results)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::create_file;
-    use crate::tmp_dir;
+    use crate::git::tmp_dir;
 
     use super::*;
     use std::fs::File;
     use std::io::Write;
     use std::str::FromStr;
     use toml::Value;
-
-    #[test]
-    fn locate_configs_returns_empty_upon_failure() -> anyhow::Result<()> {
-        let tmp = tmp_dir().unwrap();
-        create_file(&tmp, "dir1/Cargo.toml", "")?;
-        create_file(&tmp, "dir2/dir2_1/Cargo.toml", "")?;
-        create_file(&tmp, "dir3/Cargo.toml", "")?;
-
-        let result = locate_template_configs(tmp.path())?;
-        assert_eq!(Vec::new() as Vec<PathBuf>, result);
-        Ok(())
-    }
-
-    #[test]
-    fn locate_configs_can_locate_paths_with_cargo_generate() -> anyhow::Result<()> {
-        let tmp = tmp_dir().unwrap();
-        create_file(&tmp, "dir1/Cargo.toml", "")?;
-        create_file(&tmp, "dir2/dir2_1/Cargo.toml", "")?;
-        create_file(&tmp, "dir2/dir2_2/cargo-generate.toml", "")?;
-        create_file(&tmp, "dir3/Cargo.toml", "")?;
-        create_file(&tmp, "dir4/cargo-generate.toml", "")?;
-
-        let expected = vec![Path::new("dir2").join("dir2_2"), PathBuf::from("dir4")];
-        let result = locate_template_configs(tmp.path())?;
-        assert_eq!(expected, result);
-        Ok(())
-    }
-
-    #[test]
-    fn locate_configs_doesnt_look_past_cargo_generate() -> anyhow::Result<()> {
-        let tmp = tmp_dir().unwrap();
-        create_file(&tmp, "dir1/cargo-generate.toml", "")?;
-        create_file(&tmp, "dir1/dir2/cargo-generate.toml", "")?;
-
-        let expected = vec![PathBuf::from("dir1")];
-        let result = locate_template_configs(tmp.path())?;
-        assert_eq!(expected, result);
-        Ok(())
-    }
 
     #[test]
     fn test_deserializes_config() {
@@ -204,13 +157,8 @@ mod tests {
         assert_eq!(
             config.template,
             Some(TemplateConfig {
-                sub_templates: None,
                 cargo_generate_version: Some(VersionReq::from_str(">=0.8.0").unwrap()),
                 include: Some(vec!["Cargo.toml".into()]),
-                exclude: None,
-                ignore: None,
-                vcs: None,
-                init: None,
             })
         );
         assert!(config.placeholders.is_some());
@@ -228,6 +176,7 @@ mod tests {
                 hooks: None,
                 placeholders: None,
                 conditional: Default::default(),
+                demo: Default::default(),
             }
         )
     }

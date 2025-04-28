@@ -1,3 +1,11 @@
+pub mod context;
+mod env_mod;
+mod file_mod;
+mod system_mod;
+mod variable_mod;
+
+use crate::hooks::context::RhaiHooksContext;
+
 use anyhow::{Context, Result};
 use console::style;
 use env_mod::Environment;
@@ -6,95 +14,66 @@ use heck::{
     ToTitleCase, ToUpperCamelCase,
 };
 use liquid::ValueView;
-use log::debug;
+use liquid_core::Object;
+use log::info;
 use rhai::EvalAltResult;
 use std::{env, path::Path};
 
-use crate::emoji;
-use crate::template::LiquidObjectResource;
-
-mod context;
-mod env_mod;
-mod file_mod;
-mod system_mod;
-mod variable_mod;
-
 type HookResult<T> = std::result::Result<T, Box<EvalAltResult>>;
 
-struct CleanupJob<F: FnOnce()>(Option<F>);
-
-pub use context::RhaiHooksContext;
-
-impl<F: FnOnce()> CleanupJob<F> {
-    pub const fn new(f: F) -> Self {
-        Self(Some(f))
-    }
-}
-
-impl<F: FnOnce()> Drop for CleanupJob<F> {
-    fn drop(&mut self) {
-        self.0.take().unwrap()();
-    }
-}
-
 pub fn execute_hooks(context: &RhaiHooksContext, scripts: &[String]) -> Result<()> {
-    debug!("executing rhai with context: {:?}", context);
-
+    info!("executing rhai with context: {:?}", context);
+    println!("{}", style(format!("execute hooks{scripts:?}...")).red());
     let engine = create_rhai_engine(context);
     evaluate_scripts(&context.working_directory, scripts, engine)?;
     Ok(())
 }
 
 fn evaluate_scripts(template_dir: &Path, scripts: &[String], engine: rhai::Engine) -> Result<()> {
-    let cwd = env::current_dir()?;
-    let _ = CleanupJob::new(move || {
-        env::set_current_dir(cwd).ok();
-    });
     env::set_current_dir(template_dir)?;
-
+    println!(
+        "{}",
+        style(format!(
+            "Changed direction to {:?}",
+            env::current_dir().unwrap()
+        ))
+        .red()
+    );
     for script in scripts {
+        println!("{}", style(format!("Evaluate script [{script}]...")).red());
         engine
             .eval_file::<()>(script.into())
             .map_err(|e| anyhow::anyhow!(e.to_string()))
             .with_context(|| {
                 format!(
-                    "{} {} {}",
-                    emoji::ERROR,
+                    "⛔ {} {}",
                     style("Failed executing script:").bold().red(),
                     style(script.to_owned()).yellow(),
                 )
             })?;
     }
-
+    println!("{}", style(format!("Evaluate Done!")).red());
     Ok(())
 }
 
-pub fn evaluate_script<T: Clone + 'static>(
-    liquid_object: &LiquidObjectResource,
-    script: &str,
-) -> HookResult<T> {
+pub fn evaluate_script<T: Clone + 'static>(liquid_object: &Object, script: &str) -> HookResult<T> {
     let mut conditional_evaluation_engine = rhai::Engine::new();
 
     #[allow(deprecated)]
     conditional_evaluation_engine.on_var({
         let liquid_object = liquid_object.clone();
         move |name, _, _| {
-            liquid_object
-                .lock()
-                .map_err(|_| PoisonError::new_eval_alt_result())?
-                .borrow()
-                .get(name)
-                .map_or(Ok(None), |value| {
-                    Ok(value.as_view().as_scalar().map(|scalar| {
-                        scalar.to_bool().map_or_else(
-                            || {
-                                let v = scalar.to_kstr();
-                                v.as_str().into()
-                            },
-                            |v| v.into(),
-                        )
-                    }))
-                })
+            liquid_object.get(name).map_or(Ok(None), |value| {
+                Ok(value.as_view().as_scalar().map(|scalar| {
+                    scalar.to_bool().map_or_else(
+                        || {
+                            let v = scalar.to_kstr();
+                            v.as_str().into()
+                        },
+                        |v| v.into(),
+                    )
+                }))
+            })
         }
     });
 
@@ -153,11 +132,5 @@ pub struct PoisonError;
 impl<E> From<std::sync::PoisonError<E>> for PoisonError {
     fn from(_: std::sync::PoisonError<E>) -> Self {
         Self
-    }
-}
-
-impl PoisonError {
-    pub fn new_eval_alt_result() -> EvalAltResult {
-        EvalAltResult::ErrorSystem("".into(), Box::new(Self))
     }
 }

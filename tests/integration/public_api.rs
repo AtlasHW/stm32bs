@@ -1,6 +1,6 @@
 use crate::helpers::prelude::*;
 
-use cargo_generate::{generate, GenerateArgs, TemplatePath};
+use crate::{generate, GenerateArgs, TemplatePath};
 
 #[test]
 fn it_allows_generate_call_with_public_args_and_returns_the_generated_path() {
@@ -18,31 +18,23 @@ fn it_allows_generate_call_with_public_args_and_returns_the_generated_path() {
             tag: None,
             revision: None,
             path: None,
-            favorite: None,
             subfolder: None,
-            test: false,
         },
         name: Some(String::from("foobar_project")),
         force: true,
-        vcs: None,
         verbose: true,
         template_values_file: None,
         silent: false,
         continue_on_error: false,
         quiet: false,
-        list_favorites: false,
-        config: None,
         bin: true,
         lib: false,
         ssh_identity: None,
         gitconfig: None,
         define: vec![],
-        init: false,
         destination: Some(dir.clone()),
-        force_git_init: false,
         allow_commands: false,
         overwrite: false,
-        other_args: None,
         skip_submodules: false,
     };
 
