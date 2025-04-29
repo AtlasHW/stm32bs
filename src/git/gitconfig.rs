@@ -45,4 +45,3 @@ pub fn resolve_instead_url(
 
     Ok(x)
 }
-

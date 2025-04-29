@@ -1,9 +1,12 @@
-use crate::project_variables::{ArrayEntry, StringEntry, StringKind, TemplateSlots, VarInfo};
+use crate::project_variables::MSEntry;
+use crate::project_variables::{TemplateSlots, VarInfo};
+
 use anyhow::{Ok, Result};
 use console::style;
 use dialoguer::{theme::ColorfulTheme, Input, MultiSelect, Select};
 use liquid_core::Value;
 use log::warn;
+use regex::Regex;
 use std::{
     io::{stdin, Read},
     ops::Index,
@@ -17,11 +20,7 @@ pub fn name() -> Result<String> {
         var_name: "crate_name".into(),
         prompt: "🤷 Project Name".into(),
         var_info: VarInfo::String {
-            entry: Box::new(StringEntry {
-                default: None,
-                kind: StringKind::String,
-                regex: Some(valid_ident),
-            }),
+            regex: Some(valid_ident),
         },
     };
     prompt_and_check_variable(&project_var)
@@ -33,49 +32,33 @@ pub fn chip_pn() -> Result<String> {
         var_name: "chip_pn".into(),
         prompt: "🤷 Chip Part Number (eg. stm32g071cbt6)".into(),
         var_info: VarInfo::String {
-            entry: Box::new(StringEntry {
-                default: None,
-                kind: StringKind::String,
-                regex: Some(valid_ident),
-            }),
+            regex: Some(valid_ident),
         },
     };
     prompt_and_check_variable(&project_var)
 }
 
-pub fn select(choices: &Vec<&str>, prompt: &str, default: usize) -> Result<usize> {
-    if default >= choices.len() - 1 {
-        return Err(anyhow::anyhow!("Default index out of bounds"));
-    }
-    let chosen = Select::with_theme(&ColorfulTheme::default())
-        .items(choices)
-        .with_prompt(prompt)
-        .default(default)
-        .interact()?;
-
-    Ok(chosen)
+pub fn select(choices: &Vec<&str>, prompt: &str, default: Option<String>) -> Result<String> {
+    handle_choice_input(
+        &choices.iter().map(|s| s.to_string()).collect(),
+        &default,
+        &prompt.to_string(),
+    )
 }
 
-pub fn user_question(
-    prompt: &String,
-    default: &Option<String>,
-    kind: &StringKind,
-) -> Result<String> {
-    match kind {
-        StringKind::String => {
-            let mut i = Input::<String>::new().with_prompt(prompt);
-            if let Some(s) = default {
-                i = i.default(s.to_owned());
-            }
-            i.interact().map_err(Into::<anyhow::Error>::into)
-        }
-        StringKind::Text => {
+pub fn user_question(prompt: &String, qtype: usize) -> Result<String> {
+    match qtype {
+        0 => Input::<String>::new()
+            .with_prompt(prompt)
+            .interact()
+            .map_err(Into::<anyhow::Error>::into),
+        1 => {
             println!("{} (press Ctrl+d to stop reading)", prompt);
             let mut buffer = String::new();
             stdin().read_to_string(&mut buffer)?;
             Ok(buffer)
         }
-        StringKind::Choices(_) => {
+        _ => {
             unreachable!("StringKind::Choices should be handled in the parent")
         }
     }
@@ -84,13 +67,12 @@ pub fn user_question(
 pub fn prompt_and_check_variable(variable: &TemplateSlots) -> Result<String> {
     match &variable.var_info {
         VarInfo::Bool { default } => handle_bool_input(&variable.prompt, default),
-        VarInfo::String { entry } => match &entry.kind {
-            StringKind::Choices(choices) => handle_choice_input(choices, entry, &variable.prompt),
-            StringKind::String | StringKind::Text => {
-                handle_string_input(&variable.var_name, entry, &variable.prompt)
-            }
-        },
-        VarInfo::Array { entry } => handle_multi_select_input(entry, &variable.prompt),
+        VarInfo::String { regex } => {
+            handle_string_input(&variable.var_name, regex, &variable.prompt)
+        }
+        VarInfo::Text { regex } => handle_text_input(&variable.var_name, regex, &variable.prompt),
+        VarInfo::Select { choices ,default} => handle_choice_input(choices, default, &variable.prompt),
+        VarInfo::MultiSelect { entry } => handle_multi_select_input(entry, &variable.prompt),
     }
 }
 
@@ -102,7 +84,9 @@ pub fn variable(variable: &TemplateSlots) -> Result<Value> {
             Ok(Value::Scalar(as_bool.into()))
         }
         VarInfo::String { .. } => Ok(Value::Scalar(user_entry.into())),
-        VarInfo::Array { .. } => {
+        VarInfo::Text { .. } => Ok(Value::Scalar(user_entry.into())),
+        VarInfo::Select { .. } => Ok(Value::Scalar(user_entry.into())),
+        VarInfo::MultiSelect { .. } => {
             let items = if user_entry.is_empty() {
                 Vec::new()
             } else {
@@ -111,16 +95,15 @@ pub fn variable(variable: &TemplateSlots) -> Result<Value> {
                     .map(|s| Value::Scalar(s.to_string().into()))
                     .collect()
             };
-
             Ok(Value::Array(items))
         }
     }
 }
 
-fn handle_string_input(var_name: &str, entry: &StringEntry, prompt: &String) -> Result<String> {
-    match &entry.regex {
+fn handle_string_input(var_name: &str, regex: &Option<Regex>, prompt: &String) -> Result<String> {
+    match regex {
         Some(regex) => loop {
-            let user_entry = user_question(&prompt, &entry.default, &entry.kind)?;
+            let user_entry = user_question(&prompt, 0)?;
             if regex.is_match(&user_entry) {
                 break Ok(user_entry);
             }
@@ -134,17 +117,37 @@ fn handle_string_input(var_name: &str, entry: &StringEntry, prompt: &String) -> 
                     .red()
             );
         },
-        None => Ok(user_question(&prompt, &entry.default, &entry.kind)?),
+        None => Ok(user_question(&prompt, 0)?),
+    }
+}
+
+fn handle_text_input(var_name: &str, regex: &Option<Regex>, prompt: &String) -> Result<String> {
+    match regex {
+        Some(regex) => loop {
+            let user_entry = user_question(&prompt, 1)?;
+            if regex.is_match(&user_entry) {
+                break Ok(user_entry);
+            }
+
+            warn!(
+                "{} \"{}\" {}",
+                style("Sorry,").bold().red(),
+                style(&user_entry).bold().yellow(),
+                style(format!("is not a valid value for {var_name}"))
+                    .bold()
+                    .red()
+            );
+        },
+        None => Ok(user_question(&prompt, 1)?),
     }
 }
 
 fn handle_choice_input(
     choices: &Vec<String>,
-    entry: &StringEntry,
+    default: &Option<String>,
     prompt: &String,
 ) -> Result<String> {
-    let default = entry
-        .default
+    let default = default
         .as_ref()
         .map_or(0, |default| choices.binary_search(default).unwrap_or(0));
 
@@ -157,7 +160,7 @@ fn handle_choice_input(
     Ok(choices.index(chosen).to_string())
 }
 
-fn handle_multi_select_input(entry: &ArrayEntry, prompt: &String) -> Result<String> {
+fn handle_multi_select_input(entry: &MSEntry, prompt: &String) -> Result<String> {
     let val = {
         let mut selected_by_default = Vec::<bool>::with_capacity(entry.choices.len());
         match &entry.default {
@@ -207,9 +210,9 @@ mod tests {
     fn test_select_out_of_bounds_default() {
         let choices = vec!["Option 1", "Option 2", "Option 3"];
         let prompt = "Select an option".to_string();
-        let default = 5; // Out of bounds
+        let default = "Option 2".to_string(); // Out of bounds
 
-        let result = select(&choices, &prompt.as_str(), default);
+        let result = select(&choices, &prompt.as_str(), default.into());
         assert!(result.is_err());
     }
 }

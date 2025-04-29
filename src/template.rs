@@ -4,6 +4,7 @@ use indicatif::ProgressBar;
 use liquid::model::KString;
 use liquid::{Parser, ParserBuilder};
 use liquid_core::{Object, Value};
+use std::collections::HashMap;
 use std::env;
 use std::{
     fs,
@@ -18,11 +19,12 @@ use crate::git::tmp_dir;
 use crate::interactive::prompt_and_check_variable;
 use crate::progressbar;
 use crate::progressbar::spinner;
-use crate::project_variables::{StringEntry, StringKind, TemplateSlots, VarInfo};
-use crate::template_filters::*;
-use crate::template_variables::{get_authors, /*get_os_arch,*/ Authors,};
-use crate::stm32_device::chip_info::ChipInfo;
+use crate::project_variables::{TemplateSlots, VarInfo};
+use crate::stm32_device::chip_info::{ChipInfo, HSI_DEFAULT};
 use crate::stm32_device::chip_info::FREQ;
+use crate::template_filters::*;
+use crate::template_variables::{get_authors, /*get_os_arch,*/ Authors};
+use crate::template_variables::project_name::ProjectType;
 use crate::user_parsed_input::TemplateLocation;
 use crate::user_parsed_input::UserParsedInput;
 
@@ -74,48 +76,39 @@ pub fn set_project_variables(
     liquid_object: &mut Object,
     chipinfo: &ChipInfo,
     project_name: &String,
-    project_type: usize,
+    project_type: ProjectType,
 ) -> Result<()> {
     liquid_object.insert(
         "project-name".into(),
         Value::Scalar(project_name.to_owned().into()),
     );
     liquid_object.insert(
-        "target".into(), 
+        "target".into(),
         Value::Scalar(chipinfo.target.to_owned().into()),
     );
     liquid_object.insert(
-        "pac_name".into(), 
+        "pac_name".into(),
         Value::Scalar(chipinfo.pac.pac_name.to_owned().into()),
     );
     liquid_object.insert(
-        "pac_ver".into(), 
+        "pac_ver".into(),
         Value::Scalar(chipinfo.pac.version.to_owned().into()),
     );
     liquid_object.insert(
-        "pac_feature".into(), 
+        "pac_feature".into(),
         Value::Scalar(chipinfo.pac.features.to_owned().into()),
     );
+    liquid_object.insert("flash_origin".into(), Value::Scalar("0x08000000".into()));
     liquid_object.insert(
-        "flash_origin".into(), 
-        Value::Scalar("0x08000000".into()),
-    );
-    liquid_object.insert(
-        "flash_size".into(), 
+        "flash_size".into(),
         Value::Scalar(chipinfo.flash.to_owned().into()),
     );
+    liquid_object.insert("ram1_origin".into(), Value::Scalar("0x20000000".into()));
     liquid_object.insert(
-        "ram1_origin".into(), 
-        Value::Scalar("0x20000000".into()),
-    );
-    liquid_object.insert(
-        "ram1_size".into(), 
+        "ram1_size".into(),
         Value::Scalar(chipinfo.ram1.to_owned().into()),
     );
-    liquid_object.insert(
-        "pn".into(), 
-        Value::Scalar(chipinfo.pn.to_owned().into()),
-    );
+    liquid_object.insert("pn".into(), Value::Scalar(chipinfo.pn.to_owned().into()));
 
     let freq = match chipinfo.freq {
         FREQ::SINGLE(f) => f,
@@ -127,12 +120,15 @@ pub fn set_project_variables(
             }
         }
     };
-    if project_type == 0 {
-        liquid_object.insert(
-            "frequency".into(), 
-            Value::Scalar(freq.into()),
-        );
-    } 
+    if project_type == ProjectType::BSPProject {
+        liquid_object.insert("frequency".into(), Value::Scalar(freq.into()));
+    }
+    if project_type == ProjectType::DemoProject {
+        let hsi_freq = HashMap::from(HSI_DEFAULT);
+        let family = chipinfo.family.clone();
+        let hsi_freq= hsi_freq.get(family.to_string().as_str()).unwrap();
+        liquid_object.insert("HSI_freq".into(), Value::Scalar((*hsi_freq).into()));
+    }
 
     Ok(())
 }
@@ -171,7 +167,6 @@ pub fn walk_dir(
     //     .filter(|e| e.file_type().is_file())
     //     .collect::<Vec<_>>();
 
-    
     if include_list.is_empty() {
         bail!("No files to include in the template.");
     }
@@ -325,7 +320,11 @@ pub fn get_source_template_into_temp(template_location: &TemplateLocation) -> Re
                 let mut dst_path = temp_dir.path().join(filename.strip_prefix(path).unwrap());
                 if filename.is_dir() {
                     std::fs::create_dir_all(&dst_path)?;
-                    file_list.append(&mut fs::read_dir(filename)?.map(|res| res.map(|e| e.path())).collect::<Result<Vec<_>, std::io::Error>>()?);
+                    file_list.append(
+                        &mut fs::read_dir(filename)?
+                            .map(|res| res.map(|e| e.path()))
+                            .collect::<Result<Vec<_>, std::io::Error>>()?,
+                    );
                     continue;
                 }
                 if !dst_path.exists() {
@@ -370,17 +369,12 @@ fn auto_locate_template_dir(
             let prompt_args = TemplateSlots {
                 prompt: "Which template should be expanded?".into(),
                 var_name: "Template".into(),
-                var_info: VarInfo::String {
-                    entry: Box::new(StringEntry {
-                        default: Some(config_paths[0].display().to_string()),
-                        kind: StringKind::Choices(
-                            config_paths
-                                .into_iter()
-                                .map(|p| p.display().to_string())
-                                .collect(),
-                        ),
-                        regex: None,
-                    }),
+                var_info: VarInfo::Select {
+                    choices: config_paths
+                        .into_iter()
+                        .map(|p| p.display().to_string())
+                        .collect(),
+                    default: None,
                 },
             };
             let path = prompt(&prompt_args)?;

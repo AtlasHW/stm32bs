@@ -56,7 +56,6 @@ pub fn clone_git_template_into_temp(
     Ok(git_clone_dir)
 }
 
-
 #[test]
 fn should_canonicalize() {
     #[cfg(target_os = "macos")]

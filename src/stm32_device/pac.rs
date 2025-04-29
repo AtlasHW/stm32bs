@@ -1,8 +1,8 @@
-use std::path::Path;
 use anyhow::bail;
+use std::path::Path;
 
-use crate::stm32_device::read_csv::read_csv_file;
 use crate::interactive::select;
+use crate::stm32_device::read_csv::read_csv_file;
 
 pub struct PAC {
     pub pac_name: String,
@@ -13,10 +13,7 @@ impl PAC {
     pub fn from_csv_file<P: AsRef<Path>>(path: P, pn: &String) -> Result<Self, anyhow::Error> {
         let file_path = path.as_ref();
         if file_path.file_name().is_none() {
-            bail!(
-                "File does not have a valid name: {:?}",
-                file_path
-            );
+            bail!("File does not have a valid name: {:?}", file_path);
         }
         if file_path.extension().unwrap() != "csv" {
             bail!("File is not a csv file: {:?}", file_path);
@@ -27,8 +24,8 @@ impl PAC {
         if !file_path.is_file() {
             bail!("Path is not a file: {:?}", file_path);
         }
-        let data =
-            read_csv_file(&path, 0).unwrap_or_else(|err| panic!("Failed to read CSV file: {:?}", err));
+        let data = read_csv_file(&path, 0)
+            .unwrap_or_else(|err| panic!("Failed to read CSV file: {:?}", err));
         if data.is_empty() {
             bail!("CSV file is empty: {:?}", file_path);
         }
@@ -63,15 +60,14 @@ impl PAC {
                         pn
                     );
                 } else {
-                    let column3= row[3].to_string();
+                    let column3 = row[3].to_string();
                     if column3.contains(",") {
                         let feature_list = column3.split(",").collect::<Vec<_>>();
-                        let feature_index = select(
+                        features = select(
                             &feature_list,
-                            "Multy features in PAC, please select a feature you want to use",                            
-                            0
+                            "Multy features in PAC, please select a feature you want to use",
+                            None,
                         )?;
-                        features = feature_list[feature_index].to_string();
                     } else {
                         features = column3;
                     }

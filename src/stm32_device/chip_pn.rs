@@ -3,7 +3,7 @@ use log::warn;
 
 use super::device_list::DeviceList;
 use crate::interactive;
-use crate::project_variables::{StringEntry, StringKind, TemplateSlots, VarInfo};
+use crate::project_variables::{TemplateSlots, VarInfo};
 use crate::user_parsed_input::UserParsedInput;
 
 pub fn get_chip_pn(
@@ -36,14 +36,9 @@ pub fn get_chip_pn(
             let prompt_args = TemplateSlots {
                 prompt: "Which part should be used?".into(),
                 var_name: "pn".into(),
-                var_info: VarInfo::String {
-                    entry: Box::new(StringEntry {
-                        default: Some(prep_pn[0].to_string()),
-                        kind: StringKind::Choices(
-                            prep_pn.into_iter().map(|p| p.to_string()).collect(),
-                        ),
-                        regex: None,
-                    }),
+                var_info: VarInfo::Select {
+                    choices: prep_pn.into_iter().map(|p| p.to_string()).collect(),
+                    default: None,
                 },
             };
             return interactive::prompt_and_check_variable(&prompt_args);

@@ -18,3 +18,10 @@ pub fn sanitize_project_name(name: &str) -> String {
         name.to_kebab_case()
     }
 }
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum ProjectType {
+    BSPProject,
+    EmptyProject,
+    DemoProject,    
+}

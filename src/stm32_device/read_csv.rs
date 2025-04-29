@@ -1,6 +1,6 @@
+use anyhow::Result;
 use csv::Reader;
 use std::path::Path;
-use anyhow::Result;
 
 pub fn read_csv_file<P: AsRef<Path>>(path: P, skip_lines: usize) -> Result<Vec<Vec<String>>> {
     let mut rdr = Reader::from_path(path)?;

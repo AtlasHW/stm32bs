@@ -8,10 +8,7 @@ use log::info;
 use regex::Regex;
 use thiserror::Error;
 
-use crate::{
-    config::{Config, TemplateSlotsTable},
-    interactive::LIST_SEP,
-};
+use crate::config::{Config, TemplateSlotsTable};
 
 #[derive(Debug)]
 pub struct TemplateSlots {
@@ -24,29 +21,17 @@ pub struct TemplateSlots {
 /// Editor will never have choices
 #[derive(Debug, Clone)]
 pub enum VarInfo {
-    Array { entry: Box<ArrayEntry> },
+    MultiSelect { entry: MSEntry },
+    Select { choices: Vec<String>, default: Option<String> },
     Bool { default: Option<bool> },
-    String { entry: Box<StringEntry> },
+    String { regex: Option<Regex> },
+    Text { regex: Option<Regex> },
 }
 
 #[derive(Debug, Clone)]
-pub struct ArrayEntry {
+pub struct MSEntry {
     pub(crate) default: Option<Vec<String>>,
     pub(crate) choices: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct StringEntry {
-    pub(crate) default: Option<String>,
-    pub(crate) kind: StringKind,
-    pub(crate) regex: Option<Regex>,
-}
-
-#[derive(Debug, Clone)]
-pub enum StringKind {
-    Choices(Vec<String>),
-    String,
-    Text,
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -61,14 +46,6 @@ pub enum ConversionError {
     InvalidPlaceholderFormat { var_name: String },
     #[error("missing prompt question for `{var_name}`")]
     MissingPrompt { var_name: String },
-    #[error("choices array empty for `{var_name}`")]
-    EmptyChoices { var_name: String },
-    #[error("default is `{default}`, but is not a valid value in choices array `{choices:?}` for `{var_name}`")]
-    InvalidDefault {
-        var_name: String,
-        default: String,
-        choices: Vec<String>,
-    },
     #[error(
         "invalid type for variable `{var_name}`: `{value}` possible values are `bool`, `string`, `text` and `editor`"
     )]
@@ -77,8 +54,6 @@ pub enum ConversionError {
     UnsupportedChoices { var_type: String },
     #[error("bool type does not support `regex` field")]
     RegexOnBool { var_name: String },
-    #[error("field `{field}` of variable `{var_name}` does not match configured regex")]
-    RegexDoesntMatchField { var_name: String, field: String },
     #[error("regex of `{var_name}` is not a valid regex. {error}")]
     InvalidRegex {
         var_name: String,
@@ -89,19 +64,20 @@ pub enum ConversionError {
     InvalidPlaceholderName { var_name: String },
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum SupportedVarValue {
-    Bool(bool),
-    String(String),
-    Array(Vec<String>),
-}
+// #[derive(Debug, Clone, PartialEq)]
+// enum SupportedVarValue {
+//     Bool(bool),
+//     String(String),
+//     Array(Vec<String>),
+// }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SupportedVarType {
     Bool,
+    Select,
     String,
     Text,
-    Array,
+    MultiSelect,
 }
 
 const RESERVED_NAMES: [&str; 6] = [
@@ -190,55 +166,41 @@ fn try_key_value_into_slot(
     let var_type = extract_type(key, table.get("type"))?;
     let regex = extract_regex(key, var_type, table.get("regex"))?;
     let prompt = extract_prompt(key, table.get("prompt"))?;
-    let choices = extract_choices(key, var_type, regex.as_ref(), table.get("choices"))?;
-    let default_choice = extract_default(
-        key,
-        var_type,
-        regex.as_ref(),
-        table.get("default"),
-        choices.as_ref(),
-    )?;
+    let choices = extract_choices(key, var_type, table.get("choices"))?;
 
     let var_info = match var_type {
         SupportedVarType::Bool => VarInfo::Bool {
-            default: if let Some(SupportedVarValue::Bool(value)) = default_choice {
-                Some(value)
+            default: if let Some(toml::Value::Boolean(value)) = table.get("default") {
+                Some(*value)
             } else {
                 None
             },
         },
-        SupportedVarType::String => VarInfo::String {
-            entry: Box::new(StringEntry {
-                default: if let Some(SupportedVarValue::String(value)) = default_choice {
-                    Some(value)
-                } else {
-                    None
-                },
-                kind: choices.map_or(StringKind::String, StringKind::Choices),
-                regex,
-            }),
+        SupportedVarType::String => VarInfo::String { regex },
+        SupportedVarType::Select => VarInfo::Select {
+            choices: choices.unwrap_or_default(),
+            default: if let Some(toml::Value::String(value)) = table.get("default") {
+                Some(value.to_string())
+            } else {
+                None
+            },
         },
-        SupportedVarType::Array => VarInfo::Array {
-            entry: Box::new(ArrayEntry {
-                default: if let Some(SupportedVarValue::Array(value)) = default_choice {
-                    Some(value)
+        SupportedVarType::MultiSelect => VarInfo::MultiSelect {
+            entry: MSEntry {
+                default: if let Some(toml::Value::Array(value)) = table.get("default") {
+                    let default_string_array: Vec<String> = value
+                        .iter()
+                        .filter(|f| !(f.is_table() && f.is_array()))
+                        .map(|f| f.as_str().unwrap_or_default().to_string())
+                        .collect();
+                    Some(default_string_array)
                 } else {
                     None
                 },
                 choices: choices.unwrap_or_default(),
-            }),
+            },
         },
-        SupportedVarType::Text => VarInfo::String {
-            entry: Box::new(StringEntry {
-                default: if let Some(SupportedVarValue::String(value)) = default_choice {
-                    Some(value)
-                } else {
-                    None
-                },
-                kind: StringKind::Text,
-                regex,
-            }),
-        },
+        SupportedVarType::Text => VarInfo::Text { regex },
     };
     Ok(TemplateSlots {
         var_name: key.to_string(),
@@ -266,13 +228,11 @@ fn extract_regex(
                 }),
             }
         }
-        (SupportedVarType::String | SupportedVarType::Text | SupportedVarType::Array, Some(_)) => {
-            Err(ConversionError::WrongTypeParameter {
-                var_name: var_name.into(),
-                parameter: "regex".to_string(),
-                correct_type: "String".to_string(),
-            })
-        }
+        (_, Some(_)) => Err(ConversionError::WrongTypeParameter {
+            var_name: var_name.into(),
+            parameter: "regex".to_string(),
+            correct_type: "String".to_string(),
+        }),
         (_, None) => Ok(None),
     }
 }
@@ -286,7 +246,10 @@ fn extract_type(
         Some(toml::Value::String(value)) if value == "string" => Ok(SupportedVarType::String),
         Some(toml::Value::String(value)) if value == "text" => Ok(SupportedVarType::Text),
         Some(toml::Value::String(value)) if value == "bool" => Ok(SupportedVarType::Bool),
-        Some(toml::Value::String(value)) if value == "array" => Ok(SupportedVarType::Array),
+        Some(toml::Value::String(value)) if value == "select" => Ok(SupportedVarType::Select),
+        Some(toml::Value::String(value)) if value == "multiselect" => {
+            Ok(SupportedVarType::MultiSelect)
+        }
         Some(toml::Value::String(value)) => Err(ConversionError::InvalidVariableType {
             var_name: var_name.into(),
             value: value.clone(),
@@ -316,179 +279,57 @@ fn extract_prompt(
     }
 }
 
-fn extract_default(
-    var_name: &str,
-    var_type: SupportedVarType,
-    regex: Option<&Regex>,
-    table_entry: Option<&toml::Value>,
-    choices: Option<&Vec<String>>,
-) -> Result<Option<SupportedVarValue>, ConversionError> {
-    match (table_entry, choices, var_type) {
-        // no default set
-        (None, _, _) => Ok(None),
-        // default set without choices
-        (Some(toml::Value::Boolean(value)), _, SupportedVarType::Bool) => {
-            Ok(Some(SupportedVarValue::Bool(*value)))
-        }
-        (
-            Some(toml::Value::String(value)),
-            None,
-            SupportedVarType::String | SupportedVarType::Text,
-        ) => {
-            if let Some(reg) = regex {
-                if !reg.is_match(value) {
-                    return Err(ConversionError::RegexDoesntMatchField {
-                        var_name: var_name.into(),
-                        field: "default".to_string(),
-                    });
-                }
-            }
-            Ok(Some(SupportedVarValue::String(value.clone())))
-        }
-
-        // default and choices set
-        // No need to check bool because it always has a choices vec with two values
-        (
-            Some(toml::Value::String(value)),
-            Some(choices),
-            SupportedVarType::String | SupportedVarType::Text,
-        ) => {
-            if !choices.contains(value) {
-                Err(ConversionError::InvalidDefault {
-                    var_name: var_name.into(),
-                    default: value.clone(),
-                    choices: choices.clone(),
-                })
-            } else {
-                if let Some(reg) = regex {
-                    if !reg.is_match(value) {
-                        return Err(ConversionError::RegexDoesntMatchField {
-                            var_name: var_name.into(),
-                            field: "default".to_string(),
-                        });
-                    }
-                }
-                Ok(Some(SupportedVarValue::String(value.clone())))
-            }
-        }
-        (Some(toml::Value::Array(defaults)), Some(choices), SupportedVarType::Array) => {
-            let default_string_array: Vec<String> = defaults
-                .iter()
-                .filter(|f| !(f.is_table() && f.is_array()))
-                .map(|f| f.as_str().unwrap_or_default().to_string())
-                .collect();
-            if default_string_array.iter().all(|v| choices.contains(v)) {
-                Ok(Some(SupportedVarValue::Array(default_string_array.clone())))
-            } else {
-                Err(ConversionError::InvalidDefault {
-                    var_name: var_name.into(),
-                    default: default_string_array.join(LIST_SEP),
-                    choices: choices.clone(),
-                })
-            }
-        }
-
-        // Wrong type of variables
-        (Some(_), _, type_name) => Err(ConversionError::WrongTypeParameter {
-            var_name: var_name.into(),
-            parameter: "default".to_string(),
-            correct_type: match type_name {
-                SupportedVarType::Bool => "bool".to_string(),
-                SupportedVarType::String => "string".to_string(),
-                SupportedVarType::Text => "text".to_string(),
-                SupportedVarType::Array => "array".to_string(),
-            },
-        }),
-    }
-}
-
 fn extract_choices(
     var_name: &str,
     var_type: SupportedVarType,
-    regex: Option<&Regex>,
     table_entry: Option<&toml::Value>,
 ) -> Result<Option<Vec<String>>, ConversionError> {
     match (table_entry, var_type) {
-        (None, SupportedVarType::Bool | SupportedVarType::Text | SupportedVarType::Array) => {
+        (None, SupportedVarType::Bool | SupportedVarType::Text | SupportedVarType::String) => {
             Ok(None)
         }
-        (Some(_), SupportedVarType::Bool | SupportedVarType::Text) => {
+        (Some(_), SupportedVarType::Bool | SupportedVarType::Text | SupportedVarType::String) => {
             Err(ConversionError::UnsupportedChoices {
                 var_type: format!("{var_type:?}"),
             })
         }
-        (Some(toml::Value::Array(arr)), SupportedVarType::String) if arr.is_empty() => {
-            Err(ConversionError::EmptyChoices {
+        (
+            Some(toml::Value::Array(arr)),
+            SupportedVarType::Select | SupportedVarType::MultiSelect,
+        ) => {
+            let converted = arr
+                .iter()
+                .map(|entry| match entry {
+                    toml::Value::String(s) => Ok(s.clone()),
+                    _ => Err(()),
+                })
+                .collect::<Vec<_>>();
+            if converted.iter().any(|v| v.is_err()) {
+                return Err(ConversionError::WrongTypeParameter {
+                    var_name: var_name.into(),
+                    parameter: "choices".to_string(),
+                    correct_type: "String Array".to_string(),
+                });
+            }
+
+            let strings = converted
+                .iter()
+                .cloned()
+                .map(|v| v.unwrap())
+                .collect::<Vec<_>>();
+            Ok(Some(strings))
+        }
+        (Some(_), SupportedVarType::Select | SupportedVarType::MultiSelect) => {
+            Err(ConversionError::WrongTypeParameter {
                 var_name: var_name.into(),
+                parameter: "choices".to_string(),
+                correct_type: "String Array".to_string(),
             })
         }
-        (Some(toml::Value::Array(arr)), SupportedVarType::Array) => {
-            let converted = arr
-                .iter()
-                .map(|entry| match entry {
-                    toml::Value::String(s) => Ok(s.clone()),
-                    _ => Err(()),
-                })
-                .collect::<Vec<_>>();
-            if converted.iter().any(|v| v.is_err()) {
-                return Err(ConversionError::WrongTypeParameter {
-                    var_name: var_name.into(),
-                    parameter: "choices".to_string(),
-                    correct_type: "String Array".to_string(),
-                });
-            }
-
-            let strings = converted
-                .iter()
-                .cloned()
-                .map(|v| v.unwrap())
-                .collect::<Vec<_>>();
-            Ok(Some(strings))
-        }
-        (Some(_), SupportedVarType::Array) => Err(ConversionError::WrongTypeParameter {
+        (_, _) => Err(ConversionError::WrongTypeParameter {
             var_name: var_name.into(),
             parameter: "choices".to_string(),
-            correct_type: "String Array".to_string(),
+            correct_type: "Unkown Error".to_string(),
         }),
-        (Some(toml::Value::Array(arr)), SupportedVarType::String) => {
-            // Checks if very entry in the array is a String
-            let converted = arr
-                .iter()
-                .map(|entry| match entry {
-                    toml::Value::String(s) => Ok(s.clone()),
-                    _ => Err(()),
-                })
-                .collect::<Vec<_>>();
-            if converted.iter().any(|v| v.is_err()) {
-                return Err(ConversionError::WrongTypeParameter {
-                    var_name: var_name.into(),
-                    parameter: "choices".to_string(),
-                    correct_type: "String Array".to_string(),
-                });
-            }
-
-            let strings = converted
-                .iter()
-                .cloned()
-                .map(|v| v.unwrap())
-                .collect::<Vec<_>>();
-            // check if regex matches every choice
-            if let Some(reg) = regex {
-                if strings.iter().any(|v| !reg.is_match(v)) {
-                    return Err(ConversionError::RegexDoesntMatchField {
-                        var_name: var_name.into(),
-                        field: "choices".to_string(),
-                    });
-                }
-            }
-
-            Ok(Some(strings))
-        }
-        (Some(_), SupportedVarType::String) => Err(ConversionError::WrongTypeParameter {
-            var_name: var_name.into(),
-            parameter: "choices".to_string(),
-            correct_type: "String Array".to_string(),
-        }),
-        (None, SupportedVarType::String) => Ok(None),
     }
 }

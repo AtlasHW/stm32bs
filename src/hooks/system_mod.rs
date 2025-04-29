@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 
 use crate::{
     interactive::prompt_and_check_variable,
-    project_variables::{StringEntry, StringKind, TemplateSlots, VarInfo},
+    project_variables::{TemplateSlots, VarInfo},
 };
 
 use super::HookResult;
@@ -66,12 +66,9 @@ fn run_command(
             let value = prompt_and_check_variable(&TemplateSlots {
                 prompt: prompt.into(),
                 var_name: "".into(),
-                var_info: VarInfo::String {
-                    entry: Box::new(StringEntry {
-                        default: Some("no".into()),
-                        kind: StringKind::Choices(vec!["yes".into(), "no".into()]),
-                        regex: None,
-                    }),
+                var_info: VarInfo::Select {
+                    choices: vec!["yes".into(), "no".into()],
+                    default: None,
                 },
             });
 

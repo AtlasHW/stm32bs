@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
 use crate::interactive::prompt_and_check_variable;
-use crate::project_variables::{StringEntry, StringKind, TemplateSlots, VarInfo};
+use crate::project_variables::{TemplateSlots, VarInfo};
 
 use super::HookResult;
 
@@ -119,13 +119,7 @@ pub fn create_module(liquid_object: &Object) -> Module {
             let value = prompt_and_check_variable(&TemplateSlots {
                 prompt: prompt.into(),
                 var_name: "".into(),
-                var_info: VarInfo::String {
-                    entry: Box::new(StringEntry {
-                        default: None,
-                        kind: StringKind::String,
-                        regex: None,
-                    }),
-                },
+                var_info: VarInfo::String { regex: None },
             });
 
             match value {
@@ -136,17 +130,11 @@ pub fn create_module(liquid_object: &Object) -> Module {
     });
 
     module.set_native_fn("prompt", {
-        move |prompt: &str, default_value: &str| -> HookResult<String> {
+        move |prompt: &str, _default_value: &str| -> HookResult<String> {
             let value = prompt_and_check_variable(&TemplateSlots {
                 prompt: prompt.into(),
                 var_name: "".into(),
-                var_info: VarInfo::String {
-                    entry: Box::new(StringEntry {
-                        default: Some(default_value.into()),
-                        kind: StringKind::String,
-                        regex: None,
-                    }),
-                },
+                var_info: VarInfo::String { regex: None },
             });
 
             match value {
@@ -157,16 +145,12 @@ pub fn create_module(liquid_object: &Object) -> Module {
     });
 
     module.set_native_fn("prompt", {
-        move |prompt: &str, default_value: &str, regex: &str| -> HookResult<String> {
+        move |prompt: &str, _default_value: &str, regex: &str| -> HookResult<String> {
             let value = prompt_and_check_variable(&TemplateSlots {
                 prompt: prompt.into(),
                 var_name: "".into(),
                 var_info: VarInfo::String {
-                    entry: Box::new(StringEntry {
-                        default: Some(default_value.into()),
-                        kind: StringKind::String,
-                        regex: Some(Regex::new(regex).map_err(|_| "Invalid regex")?),
-                    }),
+                    regex: Some(Regex::new(regex).map_err(|_| "Invalid regex")?),
                 },
             });
 
@@ -182,17 +166,12 @@ pub fn create_module(liquid_object: &Object) -> Module {
             let value = prompt_and_check_variable(&TemplateSlots {
                 prompt: prompt.into(),
                 var_name: "".into(),
-                var_info: VarInfo::String {
-                    entry: Box::new(StringEntry {
-                        default: Some(default_value.into()),
-                        kind: StringKind::Choices(
-                            choices
-                                .iter()
-                                .map(|d| d.to_owned().into_string().unwrap())
-                                .collect(),
-                        ),
-                        regex: None,
-                    }),
+                var_info: VarInfo::Select {
+                    choices: choices
+                        .iter()
+                        .map(|d| d.to_owned().into_string().unwrap())
+                        .collect(),
+                    default: default_value.to_string().into(),
                 },
             });
 

@@ -14,8 +14,8 @@ mod template_filters;
 mod template_variables;
 mod user_parsed_input;
 
-use args::*;
 use app_log::log_env_init;
+use args::*;
 use config::TemplateConfig;
 use config::{Config, CONFIG_FILE_NAME};
 use hooks::evaluate_script;
@@ -24,15 +24,16 @@ use hooks::{context::RhaiHooksContext, execute_hooks};
 use interactive::LIST_SEP;
 use liquid::ValueView;
 use liquid_core::Value;
-use project_variables::{StringKind, VarInfo};
+use project_variables::VarInfo;
 //use serde::de;
 use stm32_device::chip_info::ChipInfo;
 use stm32_device::chip_info::ChipStatus;
 use stm32_device::chip_pn::get_chip_pn;
-use stm32_device::device_list::{DeviceList, PRODUCT_LIST_FILE_NAME, PAC_INFO_FILE_NAME};
+use stm32_device::device_list::{DeviceList, PAC_INFO_FILE_NAME, PRODUCT_LIST_FILE_NAME};
 use template::{create_liquid_object, set_project_variables};
 use template_variables::project_name::get_project_name;
 use template_variables::ProjectDir;
+use template_variables::project_name::ProjectType;
 use user_parsed_input::UserParsedInput;
 
 use anyhow::{bail, Result};
@@ -88,9 +89,13 @@ pub fn generate(args: AppArgs) -> Result<PathBuf> {
 
     check_cargo_generate_version(&config)?;
 
-    let project_dir =
-        expand_template(&template_dir, &mut config, &device_list, &user_parsed_input, &pac_file,)?;
-
+    let project_dir = expand_template(
+        &template_dir,
+        &mut config,
+        &device_list,
+        &user_parsed_input,
+        &pac_file,
+    )?;
 
     info!(
         "✨ {} {} {}",
@@ -101,7 +106,6 @@ pub fn generate(args: AppArgs) -> Result<PathBuf> {
 
     Ok(project_dir)
 }
-
 
 fn locate_template_file(name: &str, template_folder: impl AsRef<Path>) -> Result<PathBuf> {
     let search_folder = template_folder.as_ref().to_path_buf();
@@ -147,19 +151,15 @@ fn expand_template(
         if chip_info.status == ChipStatus::NRND {
             warn!(
                 "{}",
-                style(format!("Cation: The chip is NRND ( Not Recommended for New Designs )."))
-                    .bold()
-                    .red()
+                style(format!(
+                    "Cation: The chip is NRND ( Not Recommended for New Designs )."
+                ))
+                .bold()
+                .red()
             );
         }
         info!("{:?}", chip_info);
     }
-    // ++++++++++++++++++++++++++++++++++
-    let project_type = interactive::select(
-        &vec!["Project with BSP", "Empty Project", "Demo"],
-        "🤷 Choose a project type",
-        0,
-    )?;
 
     // This files must be included in the each project:
     // Cargo.toml
@@ -174,30 +174,42 @@ fn expand_template(
         ".cargo/config.toml".to_string(),
         "memory.x".to_string(),
     ];
-    match project_type {
-        0 => {
+    let project_type_str = interactive::select(
+        &vec!["Project with BSP", "Empty Project", "Demo"],
+        "🤷 Choose a project type",
+        None,
+    )?;
+
+    let project_type = match project_type_str.as_str() {
+        "Project with BSP" => {
             info!("Create a STM32 Project with BSP...");
             bail!("The function is not implemented yet!");
         }
-        1 => {
+        "Empty Project" => {
             info!("Create a Empty STM32 Project...");
-            // Select files should be included in the template
+            ProjectType::EmptyProject
         }
-        2 => {
+        "Demo" => {
             info!("Create a STM32 Demo project...");
             let demo_list = config.get_demo_list();
-            let demo_list = demo_list.iter().map(|s|s.as_str()).collect::<Vec<&str>>();
+            let demo_list = demo_list.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
             // chooce a demo for the project
-            let demo = interactive::select(
-                &demo_list,
-                "🤷 Choose a demo",
-                0,
-            )?;
+            let demo_name = interactive::select(&demo_list, "🤷 Choose a demo", None)?;
+            let demo_file = template_dir.join("demo").join(demo_name + ".rs");
+            // Copy the demo file to the main.rs
+            if demo_file.exists() {
+                std::fs::copy(&demo_file, template_dir.join("src").join("main.rs"))?;
+            } else {
+                bail!("Demo file not found: {}", demo_file.display());
+            }
+            // expand the variable in the demo file
+            println!("{:?}", demo_file);
+            ProjectType::DemoProject
         }
         _ => {
             bail!("Invalid project type selected!");
         }
-    }
+    };
 
     let destination = ProjectDir::try_from((&project_name, user_parsed_input))?;
 
@@ -264,7 +276,7 @@ fn expand_template(
     execute_hooks(&context, &config.get_post_hooks())?;
 
     // copy the template files into the project directory
-    for filename in  &include_files {
+    for filename in &include_files {
         let src_path = template_dir.join(filename);
         let dst_path = destination.as_ref().join(filename);
         if !dst_path.exists() {
@@ -344,30 +356,37 @@ fn fill_placeholders_and_merge_conditionals(
                 let value = provided_value.unwrap();
                 match &slot.var_info {
                     VarInfo::Bool { .. } => {
-                        println!("value: {:?}", value);
                         let as_bool = value.parse::<bool>();
                         if as_bool.is_ok() {
                             return Ok(Value::Scalar(as_bool.unwrap().into()));
                         }
                     }
-                    VarInfo::String { entry } => match &entry.kind {
-                        StringKind::Choices(choices) => {
-                            if choices.contains(&value) {
+                    VarInfo::String { regex, .. } => {
+                        if regex.is_none() {
+                            return Ok(Value::Scalar(value.into()));
+                        } else {
+                            let regex = regex.as_ref().unwrap();
+                            if regex.is_match(&value) {
                                 return Ok(Value::Scalar(value.into()));
                             }
                         }
-                        StringKind::String | StringKind::Text => {
-                            if entry.regex.is_none() {
+                    }
+                    VarInfo::Text { regex, .. } => {
+                        if regex.is_none() {
+                            return Ok(Value::Scalar(value.into()));
+                        } else {
+                            let regex = regex.as_ref().unwrap();
+                            if regex.is_match(&value) {
                                 return Ok(Value::Scalar(value.into()));
-                            } else {
-                                let regex = entry.regex.as_ref().unwrap();
-                                if regex.is_match(&value) {
-                                    return Ok(Value::Scalar(value.into()));
-                                }
                             }
                         }
-                    },
-                    VarInfo::Array { entry } => {
+                    }
+                    VarInfo::Select { choices, ..} => {
+                        if choices.contains(&value) {
+                            return Ok(Value::Scalar(value.into()));
+                        }
+                    }
+                    VarInfo::MultiSelect { entry } => {
                         let choices_defaults = if value.is_empty() {
                             Vec::new()
                         } else {

@@ -42,7 +42,11 @@ impl std::fmt::Debug for ChipInfo {
 }
 
 impl ChipInfo {
-    pub fn try_from_string(pn: String, info: &Vec<String>, pac_file: &Path) -> Result<Self, String> {
+    pub fn try_from_string(
+        pn: String,
+        info: &Vec<String>,
+        pac_file: &Path,
+    ) -> Result<Self, String> {
         if info.len() != 66 {
             return Err("Insufficient information provided".to_string());
         }
@@ -99,7 +103,7 @@ impl ChipInfo {
         } else if freq_temp.len() == 2 {
             println!("freq_temp: {:?}", freq_temp);
             FREQ::DUAL(
-                freq_temp[0]                
+                freq_temp[0]
                     .trim()
                     .parse::<u32>()
                     .map_err(|_| "Invalid frequency".to_string())?,
@@ -150,31 +154,36 @@ impl ChipInfo {
                     "thumbv7em-none-eabi".to_string()
                 } else {
                     "thumbv7m-none-eabi".to_string()
-                }},
+                }
+            }
             ArmCore::CortexM7 => {
                 if fpu {
                     "thumbv7em-none-eabi".to_string()
                 } else {
                     "thumbv7m-none-eabi".to_string()
-                }},
+                }
+            }
             ArmCore::CortexM33 => {
                 if fpu {
                     "thumbv8m.main-none-eabi".to_string()
                 } else {
                     "thumbv8m.main-none-eabihf".to_string()
-                }},
+                }
+            }
             ArmCore::CortexM55 => {
                 if fpu {
                     "thumbv8m.main-none-eabi".to_string()
                 } else {
                     "thumbv8m.main-none-eabihf".to_string()
-                }},
+                }
+            }
             ArmCore::CortexM4M7 => {
                 if fpu {
                     "thumbv7em-none-eabi".to_string()
                 } else {
                     "thumbv7m-none-eabi".to_string()
-                }},
+                }
+            }
         };
 
         let pac = PAC::from_csv_file(pac_file, &pn).unwrap();
@@ -271,6 +280,24 @@ pub enum FREQ {
     SINGLE(u32),
     DUAL(u32, u32),
 }
+
+pub const HSI_DEFAULT: [(&str, u32); 15] = [
+    ("STM32F0", 8_000_000),
+    ("STM32F1", 8_000_000),
+    ("STM32F2", 16_000_000),
+    ("STM32F3", 8_000_000),
+    ("STM32F4", 16_000_000),
+    ("STM32F7", 16_000_000),
+    ("STM32H7", 64_000_000),
+    ("STM32L0", 8_000_000),
+    ("STM32L1", 16_000_000),
+    ("STM32L4", 16_000_000),
+    ("STM32L5", 16_000_000),
+    ("STM32G0", 16_000_000),
+    ("STM32G4", 16_000_000),
+    ("STM32WB", 16_000_000),
+    ("STM32WL", 48_000_000),
+];
 
 #[cfg(test)]
 mod tests {
