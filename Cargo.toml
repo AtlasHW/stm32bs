@@ -4,7 +4,7 @@ description = "STM32bs, to create a stm32 project!"
 version = "0.0.1"
 authors = ["Atlas Song Khai"]
 license = "MIT OR Apache-2.0"
-repository = ""
+repository = "https://github.com/AtlasHW/stm32bs"
 edition = "2021"
 include = ["src/**/*", "LICENSE-*", "*.md"]
 
@@ -15,7 +15,7 @@ version = "~0.20"
 
 [dependencies]
 anstyle = "~1.0"
-anyhow = "~1.0"
+anyhow = "1.0.98"
 auth-git2 = "~0.5"
 clap = { version = "~4.5", features = ["derive", "wrap_help"] }
 console = "~0.15"
