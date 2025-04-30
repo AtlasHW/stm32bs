@@ -28,12 +28,7 @@ use crate::template_variables::project_name::ProjectType;
 use crate::user_parsed_input::TemplateLocation;
 use crate::user_parsed_input::UserParsedInput;
 
-pub fn create_liquid_engine(
-    template_dir: PathBuf,
-    liquid_object: Object,
-    allow_commands: bool,
-    silent: bool,
-) -> Parser {
+pub fn create_liquid_engine() -> Parser {
     ParserBuilder::with_stdlib()
         .filter(KebabCaseFilterParser)
         .filter(LowerCamelCaseFilterParser)
@@ -43,12 +38,6 @@ pub fn create_liquid_engine(
         .filter(SnakeCaseFilterParser)
         .filter(TitleCaseFilterParser)
         .filter(UpperCamelCaseFilterParser)
-        .filter(RhaiFilterParser::new(
-            template_dir,
-            liquid_object,
-            allow_commands,
-            silent,
-        ))
         .build()
         .expect("can't fail due to no partials support")
 }
@@ -76,7 +65,7 @@ pub fn set_project_variables(
     liquid_object: &mut Object,
     chipinfo: &ChipInfo,
     project_name: &String,
-    project_type: ProjectType,
+    project_type: &ProjectType,
 ) -> Result<()> {
     liquid_object.insert(
         "project-name".into(),
@@ -120,14 +109,18 @@ pub fn set_project_variables(
             }
         }
     };
-    if project_type == ProjectType::BSPProject {
-        liquid_object.insert("frequency".into(), Value::Scalar(freq.into()));
-    }
-    if project_type == ProjectType::DemoProject {
-        let hsi_freq = HashMap::from(HSI_DEFAULT);
-        let family = chipinfo.family.clone();
-        let hsi_freq= hsi_freq.get(family.to_string().as_str()).unwrap();
-        liquid_object.insert("HSI_freq".into(), Value::Scalar((*hsi_freq).into()));
+    match project_type {
+        ProjectType::BSPProject => {
+            liquid_object.insert("frequency".into(), Value::Scalar(freq.into()));
+        }
+        ProjectType::DemoProject(_) => {
+            let hsi_freq = HashMap::from(HSI_DEFAULT);
+            let family = chipinfo.family.clone();
+            let hsi_freq= hsi_freq.get(family.to_string().as_str()).unwrap();
+            liquid_object.insert("HSI_freq".into(), Value::Scalar((*hsi_freq).into()));
+            liquid_object.insert("HSI_freq".into(), Value::Scalar(freq.into()));
+        }
+        _ => {}
     }
 
     Ok(())
@@ -136,36 +129,13 @@ pub fn set_project_variables(
 #[allow(clippy::too_many_arguments)]
 pub fn walk_dir(
     include_list: &Vec<String>,
-    user_parsed_input: &UserParsedInput,
     template_dir: &Path,
     liquid_object: &mut Object,
 ) -> Result<()> {
-    // fn is_git_metadata(entry: &DirEntry) -> bool {
-    //     entry
-    //         .path()
-    //         .components()
-    //         .any(|c| c == std::path::Component::Normal(".git".as_ref()))
-    // }
-
-    let rhai_engine = create_liquid_engine(
-        template_dir.to_owned(),
-        liquid_object.clone(),
-        user_parsed_input.allow_commands(),
-        user_parsed_input.silent(),
-    );
+    let liquid_engine = create_liquid_engine();
 
     let mp = progressbar::new();
     let spinner_style = spinner();
-
-    //    let mut files_with_errors = Vec::new();
-    // let files = WalkDir::new(template_dir)
-    //     .sort_by_file_name()
-    //     .contents_first(true)
-    //     .into_iter()
-    //     .filter_map(Result::ok)
-    //     .filter(|e| !is_git_metadata(e))
-    //     .filter(|e| e.file_type().is_file())
-    //     .collect::<Vec<_>>();
 
     if include_list.is_empty() {
         bail!("No files to include in the template.");
@@ -188,7 +158,7 @@ pub fn walk_dir(
                 filepath.display()
             );
         }
-        match template_process_file(liquid_object, &rhai_engine, &filepath) {
+        match template_process_file(liquid_object, &liquid_engine, &filepath) {
             Ok(new_contents) => {
                 pb.inc(25);
                 fs::create_dir_all(filepath.parent().unwrap()).unwrap();

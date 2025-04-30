@@ -4,7 +4,6 @@ mod app_log;
 mod args;
 mod config;
 mod git;
-mod hooks;
 mod interactive;
 mod progressbar;
 mod project_variables;
@@ -18,14 +17,8 @@ use app_log::log_env_init;
 use args::*;
 use config::TemplateConfig;
 use config::{Config, CONFIG_FILE_NAME};
-use hooks::evaluate_script;
-use hooks::{context::RhaiHooksContext, execute_hooks};
-
 use interactive::LIST_SEP;
 use liquid::ValueView;
-use liquid_core::Value;
-use project_variables::VarInfo;
-//use serde::de;
 use stm32_device::chip_info::ChipInfo;
 use stm32_device::chip_info::ChipStatus;
 use stm32_device::chip_pn::get_chip_pn;
@@ -46,6 +39,8 @@ use std::{
     env,
     path::{Path, PathBuf},
 };
+use indexmap::IndexMap;
+use liquid_core::model::map::Entry;
 
 fn main() -> Result<()> {
     log_env_init();
@@ -76,16 +71,6 @@ pub fn generate(args: AppArgs) -> Result<PathBuf> {
         locate_template_file(PRODUCT_LIST_FILE_NAME, &template_dir).unwrap(),
     )?;
     let pac_file = locate_template_file(PAC_INFO_FILE_NAME, &template_dir).unwrap();
-
-    //+++++++++++++++++++++++++++++++++++
-    println!("\r\nTemplate config:");
-    println!("\ttemplate: {:?}", config.template);
-    println!("\tplaceholders: {:?}", config.placeholders);
-    println!("\thooks: {:?}", config.hooks);
-    println!("\tconditional: {:?}", config.conditional);
-    println!("\tdemo: {:?}", config.demo);
-    println!("");
-    //+++++++++++++++++++++++++++++++++++
 
     check_cargo_generate_version(&config)?;
 
@@ -126,20 +111,7 @@ fn expand_template(
 ) -> Result<PathBuf> {
     // create a liquid object with the template variables
     let mut liquid_object = create_liquid_object(user_parsed_input)?;
-    let context = RhaiHooksContext {
-        liquid_object: liquid_object.clone(),
-        allow_commands: user_parsed_input.allow_commands(),
-        silent: user_parsed_input.silent(),
-        working_directory: template_dir.to_owned(),
-        destination_directory: user_parsed_input.destination().to_owned(),
-    };
 
-    // run init hooks - these won't have access to `crate_name`/`within_cargo_project`
-    // variables, as these are not set yet. Furthermore, if `project-name` is set, it is the raw
-    // user input!
-    // The init hooks are free to set `project-name` (but it will be validated before further
-    // use).
-    execute_hooks(&context, &config.get_init_hooks())?;
 
     let project_name = get_project_name(user_parsed_input);
 
@@ -147,17 +119,17 @@ fn expand_template(
     let chip_pn = get_chip_pn(user_parsed_input, &devicelist).unwrap();
     let chip_info_raw = devicelist.devices.get(&chip_pn).unwrap();
     let chip_info = ChipInfo::try_from_string(chip_pn, chip_info_raw, pac_file).unwrap();
+    if chip_info.status == ChipStatus::NRND {
+        warn!(
+            "{}",
+            style(format!(
+                "Cation: The chip is NRND ( Not Recommended for New Designs )."
+            ))
+            .bold()
+            .red()
+        );
+    }
     if user_parsed_input.is_verbose() {
-        if chip_info.status == ChipStatus::NRND {
-            warn!(
-                "{}",
-                style(format!(
-                    "Cation: The chip is NRND ( Not Recommended for New Designs )."
-                ))
-                .bold()
-                .red()
-            );
-        }
         info!("{:?}", chip_info);
     }
 
@@ -184,6 +156,8 @@ fn expand_template(
         "Project with BSP" => {
             info!("Create a STM32 Project with BSP...");
             bail!("The function is not implemented yet!");
+            #[allow(unreachable_code)]
+            ProjectType::BSPProject
         }
         "Empty Project" => {
             info!("Create a Empty STM32 Project...");
@@ -192,10 +166,10 @@ fn expand_template(
         "Demo" => {
             info!("Create a STM32 Demo project...");
             let demo_list = config.get_demo_list();
-            let demo_list = demo_list.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
+            let demo_list = demo_list.iter().map(|s| s.as_str()).collect();
             // chooce a demo for the project
             let demo_name = interactive::select(&demo_list, "🤷 Choose a demo", None)?;
-            let demo_file = template_dir.join("demo").join(demo_name + ".rs");
+            let demo_file = template_dir.join("demo").join((&demo_name).to_string() + ".rs");
             // Copy the demo file to the main.rs
             if demo_file.exists() {
                 std::fs::copy(&demo_file, template_dir.join("src").join("main.rs"))?;
@@ -203,8 +177,8 @@ fn expand_template(
                 bail!("Demo file not found: {}", demo_file.display());
             }
             // expand the variable in the demo file
-            println!("{:?}", demo_file);
-            ProjectType::DemoProject
+
+            ProjectType::DemoProject((&demo_name).clone())
         }
         _ => {
             bail!("Invalid project type selected!");
@@ -215,7 +189,7 @@ fn expand_template(
 
     destination.create(user_parsed_input.overwrite())?;
 
-    set_project_variables(&mut liquid_object, &chip_info, &project_name, project_type)?;
+    set_project_variables(&mut liquid_object, &chip_info, &project_name, &project_type)?;
 
     info!(
         "🔧 {}",
@@ -239,41 +213,27 @@ fn expand_template(
         &mut liquid_object,
         user_parsed_input.template_values(),
     )?;
-
-    println!("{}", style("Merged!").green());
-    add_missing_provided_values(&mut liquid_object, user_parsed_input.template_values())?;
-
-    let context = RhaiHooksContext {
-        liquid_object: liquid_object.clone(),
-        destination_directory: destination.as_ref().to_owned(),
-        ..context
-    };
-
-    //+++++++++++++++++++++++++++++++++
-    println!("liquid_object: ");
-    for item in liquid_object.iter() {
-        println!("\t{:15}:\t{:?}", item.clone().0, item.clone().1);
+    if let ProjectType::DemoProject(demo_name) =  project_type{
+        fill_demo_variables(
+            config,
+            &mut liquid_object,
+            user_parsed_input.template_values(),
+            demo_name,
+        )?;
     }
-    println!("");
-    //+++++++++++++++++++++++++++++++++
 
-    println!("{}", style("execute pre hooks...").red());
-    // run pre-hooks
-    execute_hooks(&context, &config.get_pre_hooks())?;
+
+    add_missing_provided_values(&mut liquid_object, user_parsed_input.template_values())?;
 
     // walk/evaluate the template
     let mut template_config = config.template.take().unwrap_or_default();
-    println!("template_config: {template_config:?}"); //+++++++++++++++++++++++++++++++++
 
     include_files.append(template_config.include.as_mut().unwrap_or(&mut vec![]));
     template::walk_dir(
         &include_files,
-        &user_parsed_input,
         template_dir,
         &mut liquid_object,
     )?;
-    // run post-hooks
-    execute_hooks(&context, &config.get_post_hooks())?;
 
     // copy the template files into the project directory
     for filename in &include_files {
@@ -352,57 +312,8 @@ fn fill_placeholders_and_merge_conditionals(
             let provided_value = template_values
                 .get(&slot.var_name)
                 .and_then(extract_toml_string);
-            if provided_value.is_some() {
-                let value = provided_value.unwrap();
-                match &slot.var_info {
-                    VarInfo::Bool { .. } => {
-                        let as_bool = value.parse::<bool>();
-                        if as_bool.is_ok() {
-                            return Ok(Value::Scalar(as_bool.unwrap().into()));
-                        }
-                    }
-                    VarInfo::String { regex, .. } => {
-                        if regex.is_none() {
-                            return Ok(Value::Scalar(value.into()));
-                        } else {
-                            let regex = regex.as_ref().unwrap();
-                            if regex.is_match(&value) {
-                                return Ok(Value::Scalar(value.into()));
-                            }
-                        }
-                    }
-                    VarInfo::Text { regex, .. } => {
-                        if regex.is_none() {
-                            return Ok(Value::Scalar(value.into()));
-                        } else {
-                            let regex = regex.as_ref().unwrap();
-                            if regex.is_match(&value) {
-                                return Ok(Value::Scalar(value.into()));
-                            }
-                        }
-                    }
-                    VarInfo::Select { choices, ..} => {
-                        if choices.contains(&value) {
-                            return Ok(Value::Scalar(value.into()));
-                        }
-                    }
-                    VarInfo::MultiSelect { entry } => {
-                        let choices_defaults = if value.is_empty() {
-                            Vec::new()
-                        } else {
-                            value
-                                .split(LIST_SEP)
-                                .map(|s| Value::Scalar(s.to_string().into()))
-                                .collect()
-                        };
-                        if choices_defaults
-                            .iter()
-                            .all(|v| entry.choices.contains(&v.to_kstr().to_string()))
-                        {
-                            return Ok(Value::Array(choices_defaults));
-                        }
-                    }
-                }
+            if let Some(define_value) = project_variables::check_input_project_variables(slot, provided_value) {
+                return Ok(define_value);
             }
             interactive::variable(slot)
         })?;
@@ -411,10 +322,21 @@ fn fill_placeholders_and_merge_conditionals(
             .iter_mut()
             // filter each conditional config block by trueness of the expression, given the known variables
             .filter_map(|(key, cfg)| {
-                evaluate_script::<bool>(liquid_object, key)
-                    .ok()
-                    .filter(|&r| r)
-                    .map(|_| cfg)
+                if liquid_object.contains_key(key.as_str()) {
+                    let value = liquid_object.get(key.as_str()).unwrap().as_scalar().unwrap().to_bool();
+                    match value {
+                        Some(t) => {
+                            if t {
+                                Some(cfg)
+                            } else {
+                                None
+                            }
+                        }
+                        None => { None }
+                    }
+                } else {
+                    None
+                }
             })
             .map(|conditional_template_cfg| {
                 // append the conditional blocks configuration, returning true if any placeholders were added
@@ -449,6 +371,52 @@ fn fill_placeholders_and_merge_conditionals(
         }
     }
 
+    Ok(())
+}
+
+fn fill_demo_variables(
+    config: &mut Config,
+    liquid_object: &mut Object,
+    template_values: &HashMap<String, toml::Value>,
+    demo_name: String,
+) -> Result<()> {
+    let template_slots = config
+        .demo
+        .as_ref()
+        .and_then(|s|s.get(demo_name.as_str()))
+        .map(project_variables::map_to_template_slots)
+        .unwrap_or_else(|| Ok(IndexMap::new()))?;
+
+    for (&key, slot) in template_slots.iter() {
+        match liquid_object.entry(key.to_string()) {
+            Entry::Occupied(_) => {
+                // we already have the value from the config file
+            }
+            Entry::Vacant(entry) => {
+                // we don't have the file from the config but we can ask for it
+                let value = {
+                    let provided_value = template_values
+                    .get(&slot.var_name)
+                    .and_then(extract_toml_string);
+                    if let Some(define_value) = project_variables::check_input_project_variables(slot, provided_value) {
+                        define_value
+                    } else {
+                        interactive::variable(slot)?
+                    }
+                };
+                entry.insert(value);
+            }
+        }
+    }
+    project_variables::fill_project_variables(liquid_object, config, |slot| {
+        let provided_value = template_values
+            .get(&slot.var_name)
+            .and_then(extract_toml_string);
+        if let Some(define_value) = project_variables::check_input_project_variables(slot, provided_value) {
+            return Ok(define_value);
+        }
+        interactive::variable(slot)
+    })?;
     Ok(())
 }
 

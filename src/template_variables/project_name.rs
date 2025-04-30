@@ -23,5 +23,5 @@ pub fn sanitize_project_name(name: &str) -> String {
 pub enum ProjectType {
     BSPProject,
     EmptyProject,
-    DemoProject,    
+    DemoProject(String),    
 }

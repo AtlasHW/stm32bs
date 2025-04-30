@@ -12,17 +12,11 @@ pub const CONFIG_FILE_NAME: &str = "stm32bs.toml";
 pub struct Config {
     pub template: Option<TemplateConfig>,
     pub placeholders: Option<TemplateSlotsTable>,
-    pub hooks: Option<HooksConfig>,
     pub conditional: Option<HashMap<String, ConditionalConfig>>,
     pub demo: Option<HashMap<String, IndexMap<String, toml::Value>>>,
 }
 
-#[derive(Deserialize, Debug, PartialEq, Eq, Default, Clone)]
-pub struct HooksConfig {
-    pub init: Option<Vec<String>>,
-    pub pre: Option<Vec<String>>,
-    pub post: Option<Vec<String>>,
-}
+
 
 #[derive(Deserialize, Debug, PartialEq, Eq, Default, Clone)]
 pub struct TemplateConfig {
@@ -62,27 +56,6 @@ impl Config {
         };
         config.template.get_or_insert(Default::default());
         Ok(config)
-    }
-
-    pub fn get_init_hooks(&self) -> Vec<String> {
-        self.hooks
-            .as_ref()
-            .map(|h| h.init.clone().unwrap_or_default())
-            .unwrap_or_default()
-    }
-
-    pub fn get_pre_hooks(&self) -> Vec<String> {
-        self.hooks
-            .as_ref()
-            .map(|h| h.pre.clone().unwrap_or_default())
-            .unwrap_or_default()
-    }
-
-    pub fn get_post_hooks(&self) -> Vec<String> {
-        self.hooks
-            .as_ref()
-            .map(|h| h.post.clone().unwrap_or_default())
-            .unwrap_or_default()
     }
 
     pub fn get_demo_list(&self) -> Vec<String> {
@@ -173,7 +146,6 @@ mod tests {
             result,
             Config {
                 template: None,
-                hooks: None,
                 placeholders: None,
                 conditional: Default::default(),
                 demo: Default::default(),

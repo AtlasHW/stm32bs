@@ -57,7 +57,7 @@ pub fn user_question(prompt: &String, qtype: usize) -> Result<String> {
             let mut buffer = String::new();
             stdin().read_to_string(&mut buffer)?;
             Ok(buffer)
-        }
+        },
         _ => {
             unreachable!("StringKind::Choices should be handled in the parent")
         }
@@ -67,6 +67,9 @@ pub fn user_question(prompt: &String, qtype: usize) -> Result<String> {
 pub fn prompt_and_check_variable(variable: &TemplateSlots) -> Result<String> {
     match &variable.var_info {
         VarInfo::Bool { default } => handle_bool_input(&variable.prompt, default),
+        VarInfo::Integer { range } => {
+            handle_integer_input(&variable.var_name, range, &variable.prompt)
+        }
         VarInfo::String { regex } => {
             handle_string_input(&variable.var_name, regex, &variable.prompt)
         }
@@ -82,7 +85,11 @@ pub fn variable(variable: &TemplateSlots) -> Result<Value> {
         VarInfo::Bool { .. } => {
             let as_bool = user_entry.parse::<bool>()?;
             Ok(Value::Scalar(as_bool.into()))
-        }
+        },
+        VarInfo::Integer { .. } => {
+            let as_int = user_entry.trim().parse::<i32>()?;
+            Ok(Value::Scalar(as_int.into()))
+        },
         VarInfo::String { .. } => Ok(Value::Scalar(user_entry.into())),
         VarInfo::Text { .. } => Ok(Value::Scalar(user_entry.into())),
         VarInfo::Select { .. } => Ok(Value::Scalar(user_entry.into())),
@@ -100,6 +107,29 @@ pub fn variable(variable: &TemplateSlots) -> Result<Value> {
     }
 }
 
+fn handle_integer_input(var_name: &str, range: &Option<(i32, i32)>, prompt: &String) -> Result<String> {
+    match range {
+        Some(range) => loop {
+            let user_entry = Input::<i32>::new()
+            .with_prompt(prompt)
+            .interact()
+            .map_err(Into::<anyhow::Error>::into)?;
+            if range.0 <= user_entry && user_entry <= range.1 {
+                break Ok(user_entry.to_string());
+            }
+            warn!(
+                "{} \"{}\" {}",
+                style("Sorry,").bold().red(),
+                style(&user_entry).bold().yellow(),
+                style(format!("is over the range {range:?} for {var_name}"))
+                    .bold()
+                    .red()
+            );
+        },
+        None => Ok(Input::<i32>::new().with_prompt(prompt).interact()?.to_string()),
+    }
+}
+
 fn handle_string_input(var_name: &str, regex: &Option<Regex>, prompt: &String) -> Result<String> {
     match regex {
         Some(regex) => loop {
@@ -107,7 +137,6 @@ fn handle_string_input(var_name: &str, regex: &Option<Regex>, prompt: &String) -
             if regex.is_match(&user_entry) {
                 break Ok(user_entry);
             }
-
             warn!(
                 "{} \"{}\" {}",
                 style("Sorry,").bold().red(),

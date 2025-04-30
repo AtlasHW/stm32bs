@@ -30,8 +30,6 @@ pub struct UserParsedInput {
     template_values: HashMap<String, toml::Value>,
 
     overwrite: bool,
-    allow_commands: bool,
-    silent: bool,
     verbose: bool,
     //TODO:
     // 1. This structure should be used instead of args
@@ -82,8 +80,6 @@ impl UserParsedInput {
                 template_location: git_user_in.into(),
                 template_values: default_values,
                 overwrite: args.overwrite,
-                allow_commands: args.allow_commands,
-                silent: args.silent,
                 verbose: args.verbose,
                 destination,
             };
@@ -97,8 +93,6 @@ impl UserParsedInput {
                 template_location: path.as_ref().into(),
                 template_values: default_values,
                 overwrite: args.overwrite,
-                allow_commands: args.allow_commands,
-                silent: args.silent,
                 verbose: args.verbose,
                 destination,
             };
@@ -154,8 +148,6 @@ impl UserParsedInput {
             template_location: temp_location,
             template_values: default_values,
             overwrite: args.overwrite,
-            allow_commands: args.allow_commands,
-            silent: args.silent,
             verbose: args.verbose,
             destination,
         }
@@ -179,14 +171,6 @@ impl UserParsedInput {
 
     pub const fn overwrite(&self) -> bool {
         self.overwrite
-    }
-
-    pub const fn allow_commands(&self) -> bool {
-        self.allow_commands
-    }
-
-    pub const fn silent(&self) -> bool {
-        self.silent
     }
 
     pub const fn is_verbose(&self) -> bool {

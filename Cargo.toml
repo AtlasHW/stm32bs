@@ -1,8 +1,8 @@
 [package]
 name = "cargo-stm32bs"
 description = "STM32bs, to create a stm32 project!"
-version = "0.0.1"
-authors = ["Atlas Song Khai"]
+version = "0.0.2"
+authors = ["Atlas Song Kai"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/AtlasHW/stm32bs"
 edition = "2021"
@@ -21,11 +21,9 @@ clap = { version = "~4.5", features = ["derive", "wrap_help"] }
 console = "~0.15"
 dialoguer = "~0.11"
 env_logger = "~0.11"
-fs-err = "~3.1"
 gix-config = "~0.44"
 heck = "~0.5"
 home = "~0.5"
-ignore = "~0.4"
 indexmap = { version = "~2", features = ["serde"] }
 indicatif = "~0.17"
 liquid = "~0.26"
@@ -33,19 +31,14 @@ liquid-core = "~0.26"
 liquid-derive = "~0.26"
 liquid-lib = "~0.26"
 log = "~0.4"
-names = { version = "~0.14", default-features = false }
 openssl = { version = "~0.10", optional = true }
 paste = "~1.0"
 remove_dir_all = "~1.0"
-rhai = "~1.21"
-sanitize-filename = "~0.6"
 semver = { version = "~1.0", features = ["serde"] }
 serde = { version = "~1.0", features = ["derive"] }
 tempfile = "~3.19"
 thiserror = "~2.0"
-time = "~0.3"
 toml = { version = "~0.8", features = ["preserve_order"] }
-cargo-util-schemas = "~0.8.0"
 regex = "1.11.1"
 csv = "1.3.1"
 
