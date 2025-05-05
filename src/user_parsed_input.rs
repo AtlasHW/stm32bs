@@ -23,6 +23,9 @@ pub struct UserParsedInput {
 
     destination: PathBuf,
 
+    project_type: Option<String>,
+    demo_name: Option<String>,
+
     // all values that user defined through:
     // 1. environment variables
     // 2. configuration file
@@ -54,6 +57,10 @@ impl UserParsedInput {
             })
             .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| ".".into()));
 
+        let project_type = args.project_type.clone();
+
+        let demo_name = args.demo_name.clone();
+
         let mut default_values = HashMap::new();
         for item in args.define.iter() {
             if let Some((k, v)) = item.split_once('=') {
@@ -82,6 +89,8 @@ impl UserParsedInput {
                 overwrite: args.overwrite,
                 verbose: args.verbose,
                 destination,
+                project_type,
+                demo_name,
             };
         }
 
@@ -95,6 +104,8 @@ impl UserParsedInput {
                 overwrite: args.overwrite,
                 verbose: args.verbose,
                 destination,
+                project_type,
+                demo_name,
             };
         }
 
@@ -150,6 +161,8 @@ impl UserParsedInput {
             overwrite: args.overwrite,
             verbose: args.verbose,
             destination,
+            project_type,
+            demo_name,
         }
     }
 
@@ -179,6 +192,13 @@ impl UserParsedInput {
 
     pub fn destination(&self) -> &Path {
         self.destination.as_path()
+    }
+
+    pub fn project_type(&self) -> Option<&str> {
+        self.project_type.as_deref()
+    }
+    pub fn demo_name(&self) -> Option<&str> {
+        self.demo_name.as_deref()
     }
 }
 

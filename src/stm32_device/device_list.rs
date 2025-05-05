@@ -31,7 +31,7 @@ impl DeviceList {
         if !file_path.is_file() {
             return Err(anyhow::anyhow!("Path is not a file: {:?}", file_path));
         }
-        let data = read_csv_file(&path, 10)
+        let data = read_csv_file(&path, 2)
             .unwrap_or_else(|err| panic!("Failed to read CSV file: {:?}", err));
         if data.is_empty() {
             return Err(anyhow::anyhow!("CSV file is empty: {:?}", path.as_ref()));
@@ -129,7 +129,19 @@ mod tests {
         // Example: Check if a specific device exists (adjust based on actual file content)
         assert!(
             device_list.devices.contains_key("STM32C011J4"),
-            "Device1 should exist in the list"
+            "STM32C011J4 should exist in the list"
+        );
+
+        // Example: Check if a specific device exists (adjust based on actual file content)
+        assert!(
+            device_list.devices.contains_key("STM32C011D6"),
+            "STM32C011D6 should exist in the list"
+        );
+
+        // Example: Check if a specific device exists (adjust based on actual file content)
+        assert!(
+            device_list.devices.contains_key("STM32U083HC"),
+            "STM32U083HC should exist in the list"
         );
     }
 

@@ -94,12 +94,22 @@ pub struct AppArgs {
     #[arg(long, value_parser, value_name="PATH", help_heading = heading::OUTPUT_PARAMETERS)]
     pub destination: Option<PathBuf>,
 
-    /// Allows running system commands without being prompted. Warning: Setting this flag will
-    /// enable the template to run arbitrary system commands without user confirmation. Use at your
-    /// own risk and be sure to review the template code beforehand.
-    #[arg(short, long, action, help_heading = heading::OUTPUT_PARAMETERS)]
-    pub allow_commands: bool,
+    /// Select the project type.
+    /// empty : Empty project
+    /// bsp : Project with BSP
+    /// demo : Demo project
+    #[arg(long = "type", conflicts_with = "demo_name", help_heading = heading::OUTPUT_PARAMETERS)]
+    pub project_type: Option<String>,
 
+    /// Generate a demo project using demo template.
+    #[arg(long = "demo", conflicts_with = "project_type", help_heading = heading::OUTPUT_PARAMETERS)]
+    pub demo_name: Option<String>,
+
+    // /// Allows running system commands without being prompted. Warning: Setting this flag will
+    // /// enable the template to run arbitrary system commands without user confirmation. Use at your
+    // /// own risk and be sure to review the template code beforehand.
+    // #[arg(short, long, action, help_heading = heading::OUTPUT_PARAMETERS)]
+    // pub allow_commands: bool,
     /// Allow the template to overwrite existing files in the destination.
     #[arg(short, long, action, help_heading = heading::OUTPUT_PARAMETERS)]
     pub overwrite: bool,
@@ -122,7 +132,9 @@ impl Default for AppArgs {
             gitconfig: None,
             define: Vec::default(),
             destination: None,
-            allow_commands: false,
+            project_type: None,
+            demo_name: None,
+            //            allow_commands: false,
             overwrite: false,
             skip_submodules: false,
         }
@@ -208,9 +220,9 @@ impl TemplatePath {
         self.path.as_ref()
     }
 
-    pub const fn auto_path(&self) -> Option<&(impl AsRef<str> + '_)> {
-        self.auto_path.as_ref()
-    }
+    // pub const fn auto_path(&self) -> Option<&(impl AsRef<str> + '_)> {
+    //     self.auto_path.as_ref()
+    // }
 }
 
 /// To get the arguments list from terminal

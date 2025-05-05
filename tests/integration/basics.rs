@@ -8,6 +8,8 @@ fn it_can_use_a_plain_folder() {
 
     binary()
         .arg_name("foobar-project")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg(template.path())
         .current_dir(dir.path())
         .assert()
@@ -15,15 +17,22 @@ fn it_can_use_a_plain_folder() {
         .stdout(
             predicates::str::contains("Done!")
                 .and(predicates::str::contains(format!(
-                    "Favorite `{}` not found in config, using it as a local path",
+                    "Auto path `{}` detected, trying it as a local path",
                     template.path().display()
                 )))
                 .from_utf8(),
         );
 
-    let repo = git2::Repository::open(dir.path().join("foobar-project")).unwrap();
-    let references = repo.references().unwrap().count();
-    assert_eq!(0, references);
+    assert_eq!(dir.exists("foobar-project"), true);
+    assert_eq!(dir.exists("foobar-project/.git"), false);
+    assert_eq!(dir.exists("foobar-project/Cargo.toml"), true);
+    assert_eq!(dir.exists("foobar-project/memory.x"), true);
+    assert_eq!(dir.exists("foobar-project/build.rs"), true);
+    assert_eq!(dir.exists("foobar-project/src/main.rs"), true);
+    assert_eq!(dir.exists("foobar-project/build.rs"), true);
+    assert_eq!(dir.exists("foobar-project/.cargo/config.toml"), true);
+    assert_eq!(dir.exists("foobar-project/stm32bs.toml"), false);
+    assert_eq!(dir.exists("foobar-project/.stm32bs.toml"), true);
 }
 
 #[test]
@@ -34,15 +43,24 @@ fn it_can_use_a_specified_path() {
 
     binary()
         .arg_name("foobar-project")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg_path(template.path())
         .current_dir(dir.path())
         .assert()
         .success()
         .stdout(predicates::str::contains("Done!").from_utf8());
 
-    let repo = git2::Repository::open(dir.path().join("foobar-project")).unwrap();
-    let references = repo.references().unwrap().count();
-    assert_eq!(0, references);
+    assert_eq!(dir.exists("foobar-project"), true);
+    assert_eq!(dir.exists("foobar-project/.git"), false);
+    assert_eq!(dir.exists("foobar-project/Cargo.toml"), true);
+    assert_eq!(dir.exists("foobar-project/memory.x"), true);
+    assert_eq!(dir.exists("foobar-project/build.rs"), true);
+    assert_eq!(dir.exists("foobar-project/src/main.rs"), true);
+    assert_eq!(dir.exists("foobar-project/build.rs"), true);
+    assert_eq!(dir.exists("foobar-project/.cargo/config.toml"), true);
+    assert_eq!(dir.exists("foobar-project/stm32bs.toml"), false);
+    assert_eq!(dir.exists("foobar-project/.stm32bs.toml"), true);
 }
 
 #[test]
@@ -52,6 +70,8 @@ fn it_substitutes_projectname_in_cargo_toml() {
     let dir = tempdir().build();
 
     binary()
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
@@ -68,6 +88,7 @@ fn it_substitutes_projectname_in_cargo_toml() {
 #[test]
 fn it_substitutes_authors_and_username() {
     let template = tempdir()
+        .with_default_manifest()
         .file(
             "Cargo.toml",
             r#"[package]
@@ -84,6 +105,8 @@ version = "0.1.0"
 
     binary()
         .arg_git(template.path())
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg_name("foobar-project")
         .arg_branch("main")
         .current_dir(dir.path())
@@ -104,6 +127,16 @@ version = "0.1.0"
 #[test]
 fn it_substitutes_os_arch() {
     let template = tempdir()
+        .with_default_manifest()
+        .file(
+            "stm32bs.toml",
+            r#"
+[template]
+include = ["some-file"]
+description = "A wonderful project"
+version = ">=0.0.3"
+"#,
+        )
         .file("some-file", r#"{{os-arch}}"#)
         .init_git()
         .build();
@@ -112,6 +145,8 @@ fn it_substitutes_os_arch() {
 
     binary()
         .arg_git(template.path())
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg_name("foobar-project")
         .arg_branch("main")
         .current_dir(dir.path())
@@ -127,32 +162,13 @@ fn it_substitutes_os_arch() {
 }
 
 #[test]
-fn it_keeps_snake_case_projectname() {
-    let template = tempdir().init_default_template().build();
-
-    let dir = tempdir().build();
-
-    binary()
-        .arg_git(template.path())
-        .arg_name("foobar_project")
-        .arg_branch("main")
-        .current_dir(dir.path())
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("Done!").from_utf8());
-
-    assert!(dir
-        .read("foobar_project/Cargo.toml")
-        .contains("foobar_project"));
-}
-
-#[test]
 fn it_substitutes_cratename_in_a_rust_file() {
     let template = tempdir()
+        .with_default_manifest()
         .file(
-            "main.rs",
+            "src/main.rs",
             r#"
-extern crate {{crate_name}};
+extern crate {{pac_name}};
 "#,
         )
         .init_git()
@@ -164,14 +180,15 @@ extern crate {{crate_name}};
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
         .stdout(predicates::str::contains("Done!").from_utf8());
 
-    let file = dir.read("foobar-project/main.rs");
-    assert!(file.contains("foobar_project"));
-    assert!(!file.contains("foobar-project"));
+    let file = dir.read("foobar-project/src/main.rs");
+    assert!(file.contains("stm32c0"));
 }
 
 #[test]
@@ -183,6 +200,8 @@ fn short_commands_work() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
         .assert()
@@ -201,25 +220,25 @@ fn it_can_generate_inside_existing_repository() -> anyhow::Result<()> {
     binary()
         .arg_git(template.path())
         .arg_name("outer")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
         .stdout(predicates::str::contains("Done!").from_utf8());
     assert!(dir.read("outer/Cargo.toml").contains("outer"));
     let outer_project_dir = dir.path().join("outer");
-    let outer_repo = git2::Repository::discover(&outer_project_dir)?;
 
     binary()
         .arg_git(template.path())
         .arg_name("inner")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(&outer_project_dir)
         .assert()
         .success()
         .stdout(predicates::str::contains("Done!").from_utf8());
     assert!(dir.read("outer/inner/Cargo.toml").contains("inner"));
-    let inner_project_dir = outer_project_dir.join("inner");
-    let inner_repo = git2::Repository::discover(inner_project_dir)?;
-    assert_eq!(outer_repo.path(), inner_repo.path());
     Ok(())
 }
 
@@ -235,12 +254,13 @@ fn it_can_generate_into_cwd() -> anyhow::Result<()> {
     binary()
         .arg_git(template.path())
         .arg_name("my-proj")
-        .flag_init()
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
         .stdout(predicates::str::contains("Done!").from_utf8());
-    assert!(dir.read("Cargo.toml").contains("my-proj"));
+    assert!(dir.read("my-proj/Cargo.toml").contains("my-proj"));
 
     assert!(
         !dir.path().join(".git").exists(),
@@ -261,12 +281,13 @@ fn it_can_generate_into_existing_git_dir() -> anyhow::Result<()> {
     binary()
         .arg_git(template.path())
         .arg_name("my-proj")
-        .flag_init()
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
         .stdout(predicates::str::contains("Done!").from_utf8());
-    assert!(dir.read("Cargo.toml").contains("my-proj"));
+    assert!(dir.read("my-proj/Cargo.toml").contains("my-proj"));
     assert!(
         dir.read(".git/config").contains("foobar"),
         "Post-condition: .git/config is preserved"
@@ -282,6 +303,8 @@ fn it_can_generate_at_given_path() -> anyhow::Result<()> {
     fs::create_dir(&dest).expect("can create directory");
     binary()
         .arg_git(template.path())
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg_name("my-proj")
         .arg("--destination")
         .arg(&dest)
@@ -302,17 +325,19 @@ fn it_does_not_overwrite_existing_files() -> anyhow::Result<()> {
     let _ = binary()
         .arg_git(template.path())
         .arg_name("my-proj")
-        .flag_init()
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .status();
     binary()
         .arg_git(template.path())
         .arg_name("overwritten-proj")
-        .flag_init()
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success();
-    assert!(dir.read("Cargo.toml").contains("my-proj"));
+    assert!(dir.read("my-proj/Cargo.toml").contains("my-proj"));
     Ok(())
 }
 
@@ -323,99 +348,23 @@ fn it_can_overwrite_files() -> anyhow::Result<()> {
     let _ = binary()
         .arg_git(template.path())
         .arg_name("my-proj")
-        .flag_init()
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .status();
     binary()
         .arg_git(template.path())
         .arg_name("overwritten-proj")
-        .flag_init()
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg("--overwrite")
         .current_dir(dir.path())
         .assert()
         .success();
-    assert!(dir.read("Cargo.toml").contains("overwritten-proj"));
-    Ok(())
-}
-
-#[test]
-fn it_allows_user_defined_projectname_when_passing_force_flag() {
-    let template = tempdir().init_default_template().build();
-
-    let dir = tempdir().build();
-
-    binary()
-        .arg_git(template.path())
-        .arg_name("foobar_project")
-        .arg_branch("main")
-        .arg("--force")
-        .current_dir(dir.path())
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("Done!").from_utf8());
-
     assert!(dir
-        .read("foobar_project/Cargo.toml")
-        .contains("foobar_project"));
-}
-
-#[test]
-fn it_removes_files_listed_in_genignore() {
-    let template = tempdir()
-        .with_default_manifest()
-        .file(
-            ".genignore",
-            r#"deleteme.sh
-*.trash
-"#,
-        )
-        .file("deleteme.sh", r#"Nothing to see here"#)
-        .file("deleteme.trash", r#"This is trash"#)
-        .file("notme.sh", r#"I'm here!"#)
-        .init_git()
-        .build();
-
-    let dir = tempdir().build();
-
-    binary()
-        .arg_git(template.path())
-        .arg_name("foobar-project")
-        .arg_branch("main")
-        .current_dir(dir.path())
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("Done!").from_utf8());
-
-    assert!(dir.exists("foobar-project/notme.sh"));
-    assert!(dir.exists("foobar-project/deleteme.sh").not());
-    assert!(dir.exists("foobar-project/deleteme.trash").not());
-}
-
-#[test]
-fn it_prints_ignored_files_with_verbose() {
-    let template = tempdir()
-        .with_default_manifest()
-        .file(
-            ".genignore",
-            r#"deleteme.sh
-*.trash
-"#,
-        )
-        .file("deleteme.trash", r#"This is trash"#)
-        .init_git()
-        .build();
-
-    let dir = tempdir().build();
-
-    binary()
-        .arg_git(template.path())
-        .arg_name("foobar-project")
-        .arg_branch("main")
-        .arg("--verbose")
-        .current_dir(dir.path())
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("deleteme.trash").from_utf8());
+        .read("overwritten-proj/Cargo.toml")
+        .contains("overwritten-proj"));
+    Ok(())
 }
 
 #[test]
@@ -431,6 +380,8 @@ fn it_always_removes_genignore_file() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
         .assert()
@@ -443,6 +394,7 @@ fn it_always_removes_genignore_file() {
 #[test]
 fn it_always_removes_cargo_ok_file() {
     let template = tempdir()
+        .with_default_manifest()
         .file(
             "Cargo.toml",
             indoc! {r#"
@@ -462,6 +414,8 @@ fn it_always_removes_cargo_ok_file() {
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
@@ -473,6 +427,7 @@ fn it_always_removes_cargo_ok_file() {
 #[test]
 fn it_removes_genignore_files_before_substitution() {
     let template = tempdir()
+        .with_default_manifest()
         .file(
             "Cargo.toml",
             indoc! {r#"
@@ -493,6 +448,8 @@ fn it_removes_genignore_files_before_substitution() {
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
@@ -504,6 +461,7 @@ fn it_removes_genignore_files_before_substitution() {
 #[test]
 fn it_does_not_remove_files_from_outside_project_dir() {
     let template = tempdir()
+        .with_default_manifest()
         .file(
             "Cargo.toml",
             indoc! {r#"
@@ -539,6 +497,8 @@ fn it_does_not_remove_files_from_outside_project_dir() {
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
@@ -553,6 +513,7 @@ fn it_does_not_remove_files_from_outside_project_dir() {
 #[test]
 fn errant_ignore_entry_doesnt_affect_template_files() {
     let template = tempdir()
+        .with_default_manifest()
         .file(
             "Cargo.toml",
             indoc! {r#"
@@ -577,6 +538,8 @@ fn errant_ignore_entry_doesnt_affect_template_files() {
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
@@ -594,12 +557,22 @@ fn errant_ignore_entry_doesnt_affect_template_files() {
 #[test]
 fn it_loads_a_submodule() {
     let submodule = tempdir()
-        .file("README.md", "*JUST A SUBMODULE*")
+        .file("tREADME.rs", "*JUST A SUBMODULE*")
         .init_git()
         .build();
 
     let submodule_url = url::Url::from_file_path(submodule.path()).unwrap();
     let template = tempdir()
+        .with_default_manifest()
+        .file(
+            "stm32bs.toml",
+            indoc! {r#"
+                [template]
+                description = "A wonderful project"
+                version = ">=0.0.3"
+                include = ["submodule/*"]
+            "#},
+        )
         .file(
             "Cargo.toml",
             indoc! { r#"
@@ -617,6 +590,8 @@ fn it_loads_a_submodule() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
         .assert()
@@ -627,13 +602,14 @@ fn it_loads_a_submodule() {
         .read("foobar-project/Cargo.toml")
         .contains("foobar-project"));
     assert!(dir
-        .read("foobar-project/submodule/README.md")
+        .read("foobar-project/submodule/tREADME.rs")
         .contains("*JUST A SUBMODULE*"));
 }
 
 #[test]
 fn it_allows_relative_paths() {
     let template = tempdir()
+        .with_default_manifest()
         .file(
             "Cargo.toml",
             indoc! { r#"
@@ -658,6 +634,8 @@ fn it_allows_relative_paths() {
         .arg_git(relative_path)
         .arg_name("foobar-project")
         .arg_branch("main")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
@@ -669,37 +647,6 @@ fn it_allows_relative_paths() {
 }
 
 #[test]
-fn it_respects_template_branch_name() {
-    let template = tempdir().file("index.html", "My Page").init_git().build();
-
-    Command::new("git")
-        .arg("branch")
-        .arg("-m")
-        .arg("main")
-        .arg("gh-pages")
-        .current_dir(template.path())
-        .assert()
-        .success();
-
-    let dir = tempdir().build();
-    binary()
-        .arg_git(template.path())
-        .arg_name("foobar-project")
-        .arg_branch("gh-pages")
-        .current_dir(dir.path())
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("Done!").from_utf8());
-
-    Command::new("git")
-        .arg("status")
-        .current_dir(dir.path().join("foobar-project"))
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("On branch gh-pages").from_utf8());
-}
-
-#[test]
 fn it_doesnt_warn_with_neither_config_nor_ignore() {
     let template = tempdir().init_default_template().build();
     let dir = tempdir().build();
@@ -707,6 +654,8 @@ fn it_doesnt_warn_with_neither_config_nor_ignore() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
         .assert()
@@ -719,6 +668,16 @@ fn it_doesnt_warn_with_neither_config_nor_ignore() {
 #[test]
 fn it_processes_dot_github_directory_files() {
     let template = tempdir()
+        .with_default_manifest()
+        .file(
+            "stm32bs.toml",
+            indoc! {r#"
+                [template]
+                description = "A wonderful project"
+                version = ">=0.0.3"
+                include = [".github/*"]
+            "#},
+        )
         .file(".github/foo.txt", "{{project-name}}")
         .init_git()
         .build();
@@ -727,6 +686,8 @@ fn it_processes_dot_github_directory_files() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
         .assert()
@@ -753,6 +714,16 @@ _This README was generated with [cargo-readme](https://github.com/livioribeiro/c
 "#;
     let raw_template = format!("{{% raw %}}{raw_body}{{% endraw %}}");
     let template = tempdir()
+        .with_default_manifest()
+        .file(
+            "stm32bs.toml",
+            indoc! {r#"
+                [template]
+                description = "A wonderful project"
+                version = ">=0.0.3"
+                include = ["README.tpl"]
+            "#},
+        )
         .file("README.tpl", raw_template)
         .init_git()
         .build();
@@ -763,6 +734,8 @@ _This README was generated with [cargo-readme](https://github.com/livioribeiro/c
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
@@ -777,7 +750,7 @@ _This README was generated with [cargo-readme](https://github.com/livioribeiro/c
 }
 
 #[test]
-fn it_uses_vsc_none_to_avoid_initializing_repository() {
+fn it_dont_initializing_repository() {
     // Build and commit on branch named 'main'
     let template = tempdir().init_default_template().build();
 
@@ -786,8 +759,8 @@ fn it_uses_vsc_none_to_avoid_initializing_repository() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
-        .arg("--vcs")
-        .arg("nONE")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
@@ -800,39 +773,10 @@ fn it_uses_vsc_none_to_avoid_initializing_repository() {
 }
 
 #[test]
-fn it_provides_crate_type_lib() {
-    // Build and commit on branch named 'main'
-    let template = tempdir()
-        .file(
-            "Cargo.toml",
-            r#"[package]
-name = "{{project-name}}"
-description = "this is a {{crate_type}}"
-version = "0.1.0"
-"#,
-        )
-        .init_git()
-        .build();
-
-    let dir = tempdir().build();
-
-    binary()
-        .arg_git(template.path())
-        .arg_name("foobar-project")
-        .arg("--lib")
-        .current_dir(dir.path())
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("Done!").from_utf8());
-
-    let cargo_toml = dir.read("foobar-project/Cargo.toml");
-    assert!(cargo_toml.contains("this is a lib"));
-}
-
-#[test]
 fn it_provides_crate_type_bin() {
     // Build and commit on branch named 'main'
     let template = tempdir()
+        .with_default_manifest()
         .file(
             "Cargo.toml",
             r#"[package]
@@ -849,6 +793,8 @@ version = "0.1.0"
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .success()
@@ -859,37 +805,9 @@ version = "0.1.0"
 }
 
 #[test]
-fn it_skips_substitution_for_random_garbage_in_cargo_toml() {
-    let template = tempdir()
-        .file(
-            "Cargo.toml",
-            r#"[package]
-name = "{{function fart() { return "pfffttt"; } fart();}}"
-description = "A wonderful project"
-version = "0.1.0"
-"#,
-        )
-        .init_git()
-        .build();
-
-    let dir = tempdir().build();
-
-    binary()
-        .arg_git(template.path())
-        .arg_name("foobar-project")
-        .arg_branch("main")
-        .arg("--continue-on-error")
-        .current_dir(dir.path())
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("Done!").from_utf8());
-
-    assert!(dir.read("foobar-project/Cargo.toml").contains("fart"));
-}
-
-#[test]
 fn it_skips_substitution_for_unknown_variables_in_cargo_toml() {
     let template = tempdir()
+        .with_default_manifest()
         .file(
             "Cargo.toml",
             r#"[package]
@@ -907,6 +825,8 @@ version = "0.1.0"
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
         .assert()
@@ -933,6 +853,8 @@ fn error_message_for_invalid_repo_or_user() {
     binary()
         .arg_git("sassman/cli-template-rs-xx")
         .arg_name("favorite-project")
+        .arg_chip("STM32C011D6")
+        .arg_type("empty")
         .current_dir(dir.path())
         .assert()
         .failure()

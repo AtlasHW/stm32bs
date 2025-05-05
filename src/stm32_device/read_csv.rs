@@ -8,8 +8,11 @@ pub fn read_csv_file<P: AsRef<Path>>(path: P, skip_lines: usize) -> Result<Vec<V
 
     // Skip the first x rows, excluding the header
     for result in rdr.records().skip(skip_lines) {
-        let record = result?;
-        records.push(record.iter().map(|s| s.to_string()).collect());
+        if let Ok(record) = result {
+            records.push(record.iter().map(|s| s.to_string()).collect());
+        } else {
+            continue; // Skip any malformed records
+        }
     }
     Ok(records)
 }

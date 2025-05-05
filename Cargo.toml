@@ -1,7 +1,7 @@
 [package]
 name = "cargo-stm32bs"
 description = "STM32bs, to create a stm32 project!"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["Atlas Song Kai"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/AtlasHW/stm32bs"

@@ -9,7 +9,6 @@ use heck::{
 use liquid_core::{Filter, ParseFilter, Runtime, ValueView};
 use liquid_derive::FilterReflection;
 
-
 macro_rules! create_case_filter {
     ($name:literal, $kebab_name:ident, $expr:expr) => {
         paste::paste! {
@@ -56,8 +55,3 @@ create_case_filter!("snake_case", SnakeCase, |i: String| i.to_snake_case());
 create_case_filter!("title_case", TitleCase, |i: String| i.to_title_case());
 create_case_filter!("upper_camel_case", UpperCamelCase, |i: String| i
     .to_upper_camel_case());
-
-
-
-
-

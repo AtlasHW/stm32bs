@@ -1,3 +1,5 @@
+use anyhow::bail;
+use anyhow::Result;
 use core::fmt;
 use std::path::Path;
 
@@ -42,15 +44,12 @@ impl std::fmt::Debug for ChipInfo {
 }
 
 impl ChipInfo {
-    pub fn try_from_string(
-        pn: String,
-        info: &Vec<String>,
-        pac_file: &Path,
-    ) -> Result<Self, String> {
+    pub fn try_from_string(pn: String, info: &Vec<String>, pac_file: &Path) -> Result<Self> {
         if info.len() != 66 {
-            return Err("Insufficient information provided".to_string());
+            bail!("Insufficient information provided".to_string());
         }
         let family = match pn.split_at(7).0 {
+            "STM32C0" => STM32Family::STM32C0,
             "STM32F0" => STM32Family::STM32F0,
             "STM32F1" => STM32Family::STM32F1,
             "STM32F2" => STM32Family::STM32F2,
@@ -66,7 +65,7 @@ impl ChipInfo {
             "STM32G4" => STM32Family::STM32G4,
             "STM32WB" => STM32Family::STM32WB,
             "STM32WL" => STM32Family::STM32WL,
-            _ => return Err("Unknown STM32 family".to_string()),
+            _ => bail!("Unknown STM32 family".to_string()),
         };
 
         let description = info[0].clone();
@@ -89,31 +88,20 @@ impl ChipInfo {
             "Arm Cortex-M33" => ArmCore::CortexM33,
             "Arm Cortex-M55" => ArmCore::CortexM55,
             "Arm Cortex-M4, Arm Cortex-M7" => ArmCore::CortexM4M7,
-            _ => return Err("Unknown ARM core".to_string()),
+            _ => bail!("Unknown ARM core".to_string()),
         };
 
         let freq_temp: Vec<_> = info[4].split(',').collect();
         let freq = if freq_temp.len() == 1 {
-            FREQ::SINGLE(
-                freq_temp[0]
-                    .trim()
-                    .parse::<u32>()
-                    .map_err(|_| "Invalid frequency".to_string())?,
-            )
+            FREQ::SINGLE(freq_temp[0].trim().parse::<u32>()?)
         } else if freq_temp.len() == 2 {
             println!("freq_temp: {:?}", freq_temp);
             FREQ::DUAL(
-                freq_temp[0]
-                    .trim()
-                    .parse::<u32>()
-                    .map_err(|_| "Invalid frequency".to_string())?,
-                freq_temp[1]
-                    .trim()
-                    .parse::<u32>()
-                    .map_err(|_| "Invalid frequency".to_string())?,
+                freq_temp[0].trim().parse::<u32>()?,
+                freq_temp[1].trim().parse::<u32>()?,
             )
         } else {
-            return Err("Invalid frequency format".to_string());
+            bail!("Invalid frequency format".to_string());
         };
         let fpu = match info[5].as_str() {
             "Single-precision FPU" => true,
@@ -186,7 +174,7 @@ impl ChipInfo {
             }
         };
 
-        let pac = PAC::from_csv_file(pac_file, &pn).unwrap();
+        let pac = PAC::from_csv_file(pac_file, &pn)?;
 
         Ok(ChipInfo {
             pn,
@@ -232,6 +220,7 @@ pub enum ArmCore {
 
 #[derive(Debug, Clone, Copy)]
 pub enum STM32Family {
+    STM32C0,
     STM32F0,
     STM32F1,
     STM32F2,
@@ -251,6 +240,7 @@ pub enum STM32Family {
 impl STM32Family {
     pub fn to_string(&self) -> String {
         match self {
+            STM32Family::STM32C0 => "STM32C0".to_string(),
             STM32Family::STM32F0 => "STM32F0".to_string(),
             STM32Family::STM32F1 => "STM32F1".to_string(),
             STM32Family::STM32F2 => "STM32F2".to_string(),
@@ -281,7 +271,8 @@ pub enum FREQ {
     DUAL(u32, u32),
 }
 
-pub const HSI_DEFAULT: [(&str, u32); 15] = [
+pub const HSI_DEFAULT: [(&str, u32); 16] = [
+    ("STM32C0", 48_000_000),
     ("STM32F0", 8_000_000),
     ("STM32F1", 8_000_000),
     ("STM32F2", 16_000_000),

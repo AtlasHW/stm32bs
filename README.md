@@ -1,5 +1,3 @@
-<div align="center">
-
 # cargo-stm32bs
 
 this tools is stm32 cargo project generation tool, base on

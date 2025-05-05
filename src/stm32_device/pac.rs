@@ -37,7 +37,7 @@ impl PAC {
                 continue;
             }
             if row[0] == pn.as_str() {
-                if row[1] == "_" {
+                if row[1] == "-" {
                     bail!(
                         "Sorry, no PAC is found for {}, Pls update pac_info.csv in template folder",
                         pn

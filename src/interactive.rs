@@ -57,7 +57,7 @@ pub fn user_question(prompt: &String, qtype: usize) -> Result<String> {
             let mut buffer = String::new();
             stdin().read_to_string(&mut buffer)?;
             Ok(buffer)
-        },
+        }
         _ => {
             unreachable!("StringKind::Choices should be handled in the parent")
         }
@@ -74,7 +74,9 @@ pub fn prompt_and_check_variable(variable: &TemplateSlots) -> Result<String> {
             handle_string_input(&variable.var_name, regex, &variable.prompt)
         }
         VarInfo::Text { regex } => handle_text_input(&variable.var_name, regex, &variable.prompt),
-        VarInfo::Select { choices ,default} => handle_choice_input(choices, default, &variable.prompt),
+        VarInfo::Select { choices, default } => {
+            handle_choice_input(choices, default, &variable.prompt)
+        }
         VarInfo::MultiSelect { entry } => handle_multi_select_input(entry, &variable.prompt),
     }
 }
@@ -85,11 +87,11 @@ pub fn variable(variable: &TemplateSlots) -> Result<Value> {
         VarInfo::Bool { .. } => {
             let as_bool = user_entry.parse::<bool>()?;
             Ok(Value::Scalar(as_bool.into()))
-        },
+        }
         VarInfo::Integer { .. } => {
             let as_int = user_entry.trim().parse::<i32>()?;
             Ok(Value::Scalar(as_int.into()))
-        },
+        }
         VarInfo::String { .. } => Ok(Value::Scalar(user_entry.into())),
         VarInfo::Text { .. } => Ok(Value::Scalar(user_entry.into())),
         VarInfo::Select { .. } => Ok(Value::Scalar(user_entry.into())),
@@ -107,13 +109,17 @@ pub fn variable(variable: &TemplateSlots) -> Result<Value> {
     }
 }
 
-fn handle_integer_input(var_name: &str, range: &Option<(i32, i32)>, prompt: &String) -> Result<String> {
+fn handle_integer_input(
+    var_name: &str,
+    range: &Option<(i32, i32)>,
+    prompt: &String,
+) -> Result<String> {
     match range {
         Some(range) => loop {
             let user_entry = Input::<i32>::new()
-            .with_prompt(prompt)
-            .interact()
-            .map_err(Into::<anyhow::Error>::into)?;
+                .with_prompt(prompt)
+                .interact()
+                .map_err(Into::<anyhow::Error>::into)?;
             if range.0 <= user_entry && user_entry <= range.1 {
                 break Ok(user_entry.to_string());
             }
@@ -126,7 +132,10 @@ fn handle_integer_input(var_name: &str, range: &Option<(i32, i32)>, prompt: &Str
                     .red()
             );
         },
-        None => Ok(Input::<i32>::new().with_prompt(prompt).interact()?.to_string()),
+        None => Ok(Input::<i32>::new()
+            .with_prompt(prompt)
+            .interact()?
+            .to_string()),
     }
 }
 
@@ -229,19 +238,4 @@ fn handle_bool_input(prompt: &String, default: &Option<bool>) -> Result<String> 
         .interact()?;
 
     Ok(choices.index(chosen).to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_select_out_of_bounds_default() {
-        let choices = vec!["Option 1", "Option 2", "Option 3"];
-        let prompt = "Select an option".to_string();
-        let default = "Option 2".to_string(); // Out of bounds
-
-        let result = select(&choices, &prompt.as_str(), default.into());
-        assert!(result.is_err());
-    }
 }

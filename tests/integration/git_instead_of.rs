@@ -16,8 +16,10 @@ fn should_read_the_instead_of_config_and_rewrite_an_git_at_url_to_https() {
 
     binary()
         .arg_gitconfig(gitconfig_dir.path().join(".gitconfig"))
-        .arg_git("git@github.com:rustwasm/wasm-pack-template.git")
+        .arg_git("git@github.com:AtlasHW/stm32bs-template-default")
         .arg_name("foobar-project")
+        .arg_chip("STM32F103C8")
+        .arg_type("empty")
         .current_dir(target.path())
         .env("RUST_LOG", "debug")
         .assert()
@@ -25,7 +27,7 @@ fn should_read_the_instead_of_config_and_rewrite_an_git_at_url_to_https() {
         .stdout(
             predicates::str::contains("Done!").from_utf8().and(
                 predicates::str::contains(
-                    "gitconfig 'insteadOf' lead to this url: https://github.com/rustwasm/wasm-pack-template.git",
+                    "gitconfig 'insteadOf' lead to this url: https://github.com/AtlasHW/stm32bs-template-default",
                 )
                 .from_utf8(),
             ),
@@ -51,8 +53,10 @@ fn should_read_the_instead_of_config_and_rewrite_an_ssh_url_to_https() {
 
     binary()
         .arg_gitconfig(gitconfig_dir.path().join(".gitconfig"))
-        .arg_git("ssh://git@github.com/rustwasm/wasm-pack-template.git")
+        .arg_git("ssh://git@github.com/AtlasHW/stm32bs-template-default")
         .arg_name("foobar-project")
+        .arg_chip("STM32G071CB")
+        .arg_type("empty")
         .current_dir(target.path())
         .env("RUST_LOG", "debug")
         .assert()
@@ -60,7 +64,7 @@ fn should_read_the_instead_of_config_and_rewrite_an_ssh_url_to_https() {
         .stdout(
             predicates::str::contains("Done!").from_utf8().and(
                 predicates::str::contains(
-                    "gitconfig 'insteadOf' lead to this url: https://github.com/rustwasm/wasm-pack-template.git",
+                    "gitconfig 'insteadOf' lead to this url: https://github.com/AtlasHW/stm32bs-template-default",
                 )
                 .from_utf8(),
             ),

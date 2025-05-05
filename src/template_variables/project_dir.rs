@@ -6,7 +6,7 @@ use std::{
 use anyhow::bail;
 use console::style;
 
-use crate::template_variables::project_name::sanitize_project_name;
+//use crate::template_variables::project_name::sanitize_project_name;
 use crate::user_parsed_input::UserParsedInput;
 use log::warn;
 
@@ -34,28 +34,8 @@ impl TryFrom<(&String, &UserParsedInput)> for ProjectDir {
         (project_name_input, user_parsed_input): (&String, &UserParsedInput),
     ) -> Result<Self, Self::Error> {
         let base_path = user_parsed_input.destination();
-
-        let name = user_parsed_input
-            .name()
-            .map_or_else(|| project_name_input.to_owned(), String::from);
-
-        let dir_name = None.unwrap_or_else(|| {
-            let renamed_project_name = sanitize_project_name(name.as_str());
-            if renamed_project_name != name {
-                warn!(
-                    "{} `{}` {} `{}`{}",
-                    style("Renaming project called").bold(),
-                    style(name).bold().yellow(),
-                    style("to").bold(),
-                    style(&renamed_project_name).bold().green(),
-                    style("...").bold()
-                );
-            }
-            renamed_project_name
-        });
-
-        let project_dir = base_path.join(dir_name);
-
+        let name = project_name_input.to_string();
+        let project_dir = base_path.join(name);
         Ok(Self(project_dir))
     }
 }

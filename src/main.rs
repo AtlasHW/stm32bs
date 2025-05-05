@@ -2,21 +2,20 @@
 mod absolute_path;
 mod app_log;
 mod args;
-mod config;
 mod git;
 mod interactive;
 mod progressbar;
+mod project_config;
 mod project_variables;
 mod stm32_device;
 mod template;
+mod template_config;
 mod template_filters;
 mod template_variables;
 mod user_parsed_input;
 
 use app_log::log_env_init;
 use args::*;
-use config::TemplateConfig;
-use config::{Config, CONFIG_FILE_NAME};
 use interactive::LIST_SEP;
 use liquid::ValueView;
 use stm32_device::chip_info::ChipInfo;
@@ -24,13 +23,18 @@ use stm32_device::chip_info::ChipStatus;
 use stm32_device::chip_pn::get_chip_pn;
 use stm32_device::device_list::{DeviceList, PAC_INFO_FILE_NAME, PRODUCT_LIST_FILE_NAME};
 use template::{create_liquid_object, set_project_variables};
+use template_config::TemplateConfig;
+use template_config::{Config, CONFIG_FILE_NAME};
 use template_variables::project_name::get_project_name;
-use template_variables::ProjectDir;
+use template_variables::project_name::get_project_type;
 use template_variables::project_name::ProjectType;
+use template_variables::ProjectDir;
 use user_parsed_input::UserParsedInput;
 
 use anyhow::{bail, Result};
 use console::style;
+use indexmap::IndexMap;
+use liquid_core::model::map::Entry;
 use liquid_core::Object;
 use log::{error, info, warn};
 use std::vec;
@@ -39,15 +43,42 @@ use std::{
     env,
     path::{Path, PathBuf},
 };
-use indexmap::IndexMap;
-use liquid_core::model::map::Entry;
+
+const DEFAULT_TEMPLATE: &str = "https://github.com/AtlasHW/stm32bs-template-default";
 
 fn main() -> Result<()> {
     log_env_init();
     let args = resolve_args();
     if !args.template_path.have_any_path() {
-        // Manage the project
-        error!("Project manage function is processing!");
+        if let Ok(config_file) = project_config::check_config_file() {
+            // check stm32bs project type
+            // if the project is a bsp project, continue
+            // else, rise an error
+            let project_config = project_config::ProjectConfig::from_path(&config_file)?;
+            let prj_type = project_config
+                .project
+                .as_ref()
+                .and_then(|s| s.get("project_type"))
+                .and_then(|s| s.as_str());
+            if let Some(prj_type) = prj_type {
+                if prj_type == "Project with BSP" {
+                    info!("Project type: {}", prj_type);
+                    bail!("The function is developing, it will come soon!");
+                } else {
+                    error!("{} is not supported! for the function, you can use generate a BSP project!",
+                     prj_type);
+                    bail!("Error: Project type is not supported!");
+                }
+            } else {
+                bail!("Config file has been tampered!");
+            }
+        }
+        // cannot find any project config file, to generate a new project
+        else {
+            let mut args = args;
+            args.template_path.git = Some(DEFAULT_TEMPLATE.to_string());
+            generate(args)?;
+        }
     } else {
         // Create a new project from template
         generate(args)?;
@@ -56,24 +87,20 @@ fn main() -> Result<()> {
 }
 
 /// To generate a cargo project for stm32
-pub fn generate(args: AppArgs) -> Result<PathBuf> {
+fn generate(args: AppArgs) -> Result<PathBuf> {
     // mash AppConfig and CLI arguments together into UserParsedInput
     let user_parsed_input = UserParsedInput::try_from_args(&args);
     // copy the template files into a temporary directory
     let temp_dir = template::get_source_template_into_temp(user_parsed_input.location())?;
     let template_dir = template::resolve_template_dir(&temp_dir)?;
-
     // read configuration in the template
     let mut config =
         Config::from_path(&locate_template_file(CONFIG_FILE_NAME, &template_dir).ok())?;
-
     let device_list = DeviceList::try_from_path(
         locate_template_file(PRODUCT_LIST_FILE_NAME, &template_dir).unwrap(),
     )?;
     let pac_file = locate_template_file(PAC_INFO_FILE_NAME, &template_dir).unwrap();
-
-    check_cargo_generate_version(&config)?;
-
+    check_stm32bs_version(&config)?;
     let project_dir = expand_template(
         &template_dir,
         &mut config,
@@ -81,7 +108,6 @@ pub fn generate(args: AppArgs) -> Result<PathBuf> {
         &user_parsed_input,
         &pac_file,
     )?;
-
     info!(
         "✨ {} {} {}",
         style("Done!").bold().green(),
@@ -112,13 +138,12 @@ fn expand_template(
     // create a liquid object with the template variables
     let mut liquid_object = create_liquid_object(user_parsed_input)?;
 
-
     let project_name = get_project_name(user_parsed_input);
 
     // build a supported chip info list
     let chip_pn = get_chip_pn(user_parsed_input, &devicelist).unwrap();
     let chip_info_raw = devicelist.devices.get(&chip_pn).unwrap();
-    let chip_info = ChipInfo::try_from_string(chip_pn, chip_info_raw, pac_file).unwrap();
+    let chip_info = ChipInfo::try_from_string(chip_pn, chip_info_raw, pac_file)?;
     if chip_info.status == ChipStatus::NRND {
         warn!(
             "{}",
@@ -146,30 +171,16 @@ fn expand_template(
         ".cargo/config.toml".to_string(),
         "memory.x".to_string(),
     ];
-    let project_type_str = interactive::select(
-        &vec!["Project with BSP", "Empty Project", "Demo"],
-        "🤷 Choose a project type",
-        None,
-    )?;
 
-    let project_type = match project_type_str.as_str() {
-        "Project with BSP" => {
-            info!("Create a STM32 Project with BSP...");
-            bail!("The function is not implemented yet!");
-            #[allow(unreachable_code)]
-            ProjectType::BSPProject
-        }
-        "Empty Project" => {
-            info!("Create a Empty STM32 Project...");
-            ProjectType::EmptyProject
-        }
-        "Demo" => {
-            info!("Create a STM32 Demo project...");
-            let demo_list = config.get_demo_list();
-            let demo_list = demo_list.iter().map(|s| s.as_str()).collect();
-            // chooce a demo for the project
-            let demo_name = interactive::select(&demo_list, "🤷 Choose a demo", None)?;
-            let demo_file = template_dir.join("demo").join((&demo_name).to_string() + ".rs");
+    let project_type = get_project_type(user_parsed_input, config)?;
+
+    match &project_type {
+        ProjectType::BSPProject => {}
+        ProjectType::EmptyProject => {}
+        ProjectType::DemoProject(demo_name) => {
+            let demo_file = template_dir
+                .join("demo")
+                .join((&demo_name).to_string() + ".rs");
             // Copy the demo file to the main.rs
             if demo_file.exists() {
                 std::fs::copy(&demo_file, template_dir.join("src").join("main.rs"))?;
@@ -177,18 +188,10 @@ fn expand_template(
                 bail!("Demo file not found: {}", demo_file.display());
             }
             // expand the variable in the demo file
-
-            ProjectType::DemoProject((&demo_name).clone())
-        }
-        _ => {
-            bail!("Invalid project type selected!");
         }
     };
-
     let destination = ProjectDir::try_from((&project_name, user_parsed_input))?;
-
     destination.create(user_parsed_input.overwrite())?;
-
     set_project_variables(&mut liquid_object, &chip_info, &project_name, &project_type)?;
 
     info!(
@@ -213,27 +216,26 @@ fn expand_template(
         &mut liquid_object,
         user_parsed_input.template_values(),
     )?;
-    if let ProjectType::DemoProject(demo_name) =  project_type{
+    if let ProjectType::DemoProject(demo_name) = &project_type {
         fill_demo_variables(
             config,
             &mut liquid_object,
             user_parsed_input.template_values(),
-            demo_name,
+            demo_name.clone(),
         )?;
     }
-
 
     add_missing_provided_values(&mut liquid_object, user_parsed_input.template_values())?;
 
     // walk/evaluate the template
-    let mut template_config = config.template.take().unwrap_or_default();
+    let template_config = config.template.take().unwrap_or_default();
 
-    include_files.append(template_config.include.as_mut().unwrap_or(&mut vec![]));
-    template::walk_dir(
-        &include_files,
+    template_config::replenish_include_file(
         template_dir,
-        &mut liquid_object,
+        &mut include_files,
+        &template_config.include,
     )?;
+    template::walk_dir(&include_files, template_dir, &mut liquid_object)?;
 
     // copy the template files into the project directory
     for filename in &include_files {
@@ -245,7 +247,13 @@ fn expand_template(
         std::fs::copy(src_path, dst_path)?;
     }
 
-    config.template.replace(template_config);
+    // write the project config file
+    project_config::write_project_config_file(
+        &destination,
+        project_type.clone(),
+        // BSP settings, for BSP project, not implemented yet
+    )?;
+    //    config.template.replace(template_config);
     Ok(destination.as_ref().to_owned())
 }
 
@@ -312,7 +320,9 @@ fn fill_placeholders_and_merge_conditionals(
             let provided_value = template_values
                 .get(&slot.var_name)
                 .and_then(extract_toml_string);
-            if let Some(define_value) = project_variables::check_input_project_variables(slot, provided_value) {
+            if let Some(define_value) =
+                project_variables::check_input_project_variables(slot, provided_value)
+            {
                 return Ok(define_value);
             }
             interactive::variable(slot)
@@ -323,7 +333,12 @@ fn fill_placeholders_and_merge_conditionals(
             // filter each conditional config block by trueness of the expression, given the known variables
             .filter_map(|(key, cfg)| {
                 if liquid_object.contains_key(key.as_str()) {
-                    let value = liquid_object.get(key.as_str()).unwrap().as_scalar().unwrap().to_bool();
+                    let value = liquid_object
+                        .get(key.as_str())
+                        .unwrap()
+                        .as_scalar()
+                        .unwrap()
+                        .to_bool();
                     match value {
                         Some(t) => {
                             if t {
@@ -332,7 +347,7 @@ fn fill_placeholders_and_merge_conditionals(
                                 None
                             }
                         }
-                        None => { None }
+                        None => None,
                     }
                 } else {
                     None
@@ -383,7 +398,7 @@ fn fill_demo_variables(
     let template_slots = config
         .demo
         .as_ref()
-        .and_then(|s|s.get(demo_name.as_str()))
+        .and_then(|s| s.get(demo_name.as_str()))
         .map(project_variables::map_to_template_slots)
         .unwrap_or_else(|| Ok(IndexMap::new()))?;
 
@@ -396,9 +411,11 @@ fn fill_demo_variables(
                 // we don't have the file from the config but we can ask for it
                 let value = {
                     let provided_value = template_values
-                    .get(&slot.var_name)
-                    .and_then(extract_toml_string);
-                    if let Some(define_value) = project_variables::check_input_project_variables(slot, provided_value) {
+                        .get(&slot.var_name)
+                        .and_then(extract_toml_string);
+                    if let Some(define_value) =
+                        project_variables::check_input_project_variables(slot, provided_value)
+                    {
                         define_value
                     } else {
                         interactive::variable(slot)?
@@ -412,7 +429,9 @@ fn fill_demo_variables(
         let provided_value = template_values
             .get(&slot.var_name)
             .and_then(extract_toml_string);
-        if let Some(define_value) = project_variables::check_input_project_variables(slot, provided_value) {
+        if let Some(define_value) =
+            project_variables::check_input_project_variables(slot, provided_value)
+        {
             return Ok(define_value);
         }
         interactive::variable(slot)
@@ -420,10 +439,10 @@ fn fill_demo_variables(
     Ok(())
 }
 
-fn check_cargo_generate_version(template_config: &Config) -> Result<(), anyhow::Error> {
+fn check_stm32bs_version(template_config: &Config) -> Result<(), anyhow::Error> {
     if let Config {
         template:
-            Some(config::TemplateConfig {
+            Some(template_config::TemplateConfig {
                 cargo_generate_version: Some(requirement),
                 ..
             }),

@@ -2,6 +2,7 @@ use anyhow::Result;
 use indexmap::IndexMap;
 use semver::VersionReq;
 use serde::Deserialize;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::{collections::HashMap, fs};
 use std::{convert::TryFrom, io::ErrorKind};
@@ -15,8 +16,6 @@ pub struct Config {
     pub conditional: Option<HashMap<String, ConditionalConfig>>,
     pub demo: Option<HashMap<String, IndexMap<String, toml::Value>>>,
 }
-
-
 
 #[derive(Deserialize, Debug, PartialEq, Eq, Default, Clone)]
 pub struct TemplateConfig {
@@ -95,6 +94,59 @@ pub fn locate_template_configs(base_dir: &Path) -> Result<Vec<PathBuf>> {
     }
     results.sort();
     Ok(results)
+}
+
+/// Repleish
+pub fn replenish_include_file<P: AsRef<Path>>(
+    template_path: P,
+    include_list: &mut Vec<String>,
+    config_include_file: &Option<Vec<String>>,
+) -> Result<()> {
+    if let Some(config_include_items) = config_include_file {
+        let path = template_path.as_ref().to_path_buf();
+        for item in config_include_items {
+            let file = path.join(item);
+            if file.file_name() == Some(OsStr::new("*")) {
+                let file_parent = file.parent().unwrap();
+                let mut file_list: Vec<PathBuf> = Vec::new();
+                file_list.push(file_parent.to_path_buf());
+                loop {
+                    if file_list.is_empty() {
+                        break;
+                    }
+                    let file_node = file_list.pop().unwrap();
+                    let read_dir = file_node.read_dir()?;
+                    for file_item in read_dir {
+                        let file_item = file_item?;
+                        if file_item.path().is_dir() {
+                            file_list.push(file_item.path());
+                        } else if !include_list
+                            .contains(&file_item.path().to_str().unwrap().to_string())
+                        {
+                            include_list.push(
+                                file_item
+                                    .path()
+                                    .strip_prefix(&template_path)?
+                                    .to_str()
+                                    .unwrap()
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+            } else {
+                include_list.push(
+                    file.strip_prefix(&template_path)?
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                );
+            }
+        }
+        return Ok(());
+    } else {
+        return Ok(());
+    }
 }
 
 #[cfg(test)]

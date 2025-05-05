@@ -12,19 +12,34 @@ pub struct CargoGenerateArgBuilder(Command);
 impl CargoGenerateArgBuilder {
     pub fn new() -> Self {
         let mut builder = Self(Command::cargo_bin(env!("CARGO_PKG_NAME")).unwrap());
-        builder.0.arg("generate");
+        builder.0.arg("stm32bs");
 
         builder
-    }
-
-    /// wrapper for `--init` cli flag
-    pub fn flag_init(&mut self) -> &mut Self {
-        self.arg("--init")
     }
 
     /// wrapper for `--name <name>` cli argument
     pub fn arg_name(&mut self, name: impl AsRef<OsStr>) -> &mut Self {
         self.arg("--name").arg(name)
+    }
+
+    /// wrapper for `--chip <chip>` cli argument
+    pub fn arg_chip(&mut self, chip: impl AsRef<OsStr>) -> &mut Self {
+        self.arg("--chip").arg(chip)
+    }
+
+    /// wrapper for `--type <type>` cli argument
+    pub fn arg_type(&mut self, project_type: impl AsRef<OsStr>) -> &mut Self {
+        self.arg("--type").arg(project_type)
+    }
+
+    /// wrapper for `--demo <demo>` cli argument
+    pub fn arg_demo(&mut self, demo_name: impl AsRef<OsStr>) -> &mut Self {
+        self.arg("--demo").arg(demo_name)
+    }
+
+    /// wrapper for `--define <var=value>` cli argument
+    pub fn arg_define(&mut self, value: impl AsRef<OsStr>) -> &mut Self {
+        self.arg("-d").arg(value)
     }
 
     /// wrapper for `--branch <name>` cli argument
@@ -64,10 +79,10 @@ impl CargoGenerateArgBuilder {
         self
     }
 
-    pub fn args(&mut self, args: impl IntoIterator<Item = impl AsRef<OsStr>>) -> &mut Self {
-        self.0.args(args);
-        self
-    }
+    // pub fn args(&mut self, args: impl IntoIterator<Item = impl AsRef<OsStr>>) -> &mut Self {
+    //     self.0.args(args);
+    //     self
+    // }
 
     /// proxy for `Command::current_dir` also it consumes self and returns the inner Command
     pub fn current_dir(&mut self, path: impl AsRef<Path>) -> &mut Command {

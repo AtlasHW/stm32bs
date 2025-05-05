@@ -8,8 +8,8 @@ use log::info;
 use regex::Regex;
 use thiserror::Error;
 
-use crate::config::{Config, TemplateSlotsTable};
 use crate::interactive::LIST_SEP;
+use crate::template_config::{Config, TemplateSlotsTable};
 
 #[derive(Debug, Clone)]
 pub struct TemplateSlots {
@@ -22,12 +22,25 @@ pub struct TemplateSlots {
 /// Editor will never have choices
 #[derive(Debug, Clone)]
 pub enum VarInfo {
-    MultiSelect { entry: MSEntry },
-    Select { choices: Vec<String>, default: Option<String> },
-    Bool { default: Option<bool> },
-    String { regex: Option<Regex> },
-    Text { regex: Option<Regex> },
-    Integer{ range: Option<(i32, i32)> },
+    MultiSelect {
+        entry: MSEntry,
+    },
+    Select {
+        choices: Vec<String>,
+        default: Option<String>,
+    },
+    Bool {
+        default: Option<bool>,
+    },
+    String {
+        regex: Option<Regex>,
+    },
+    Text {
+        regex: Option<Regex>,
+    },
+    Integer {
+        range: Option<(i32, i32)>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -142,7 +155,10 @@ pub fn fill_project_variables(
     Ok(())
 }
 
-pub fn check_input_project_variables(slot:&TemplateSlots, provided_value:Option<String>) -> Option<Value> {
+pub fn check_input_project_variables(
+    slot: &TemplateSlots,
+    provided_value: Option<String>,
+) -> Option<Value> {
     let value = match provided_value {
         Some(value) => value,
         None => return None,
@@ -185,7 +201,7 @@ pub fn check_input_project_variables(slot:&TemplateSlots, provided_value:Option<
                 }
             }
         }
-        VarInfo::Select { choices, ..} => {
+        VarInfo::Select { choices, .. } => {
             if choices.contains(&value) {
                 return Some(Value::Scalar(value.into()));
             }
@@ -445,11 +461,9 @@ fn extract_choices(
                 var_name: var_name.into(),
             })
         }
-        (Some(_), _) => {
-            Err(ConversionError::UnsupportedChoices {
-                var_type: format!("{var_type:?}"),
-            })
-        }
+        (Some(_), _) => Err(ConversionError::UnsupportedChoices {
+            var_type: format!("{var_type:?}"),
+        }),
         (_, _) => Ok(None),
     }
 }

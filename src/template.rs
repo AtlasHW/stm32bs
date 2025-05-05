@@ -13,18 +13,18 @@ use std::{
 use tempfile::TempDir;
 //use walkdir::{DirEntry, WalkDir};
 
-use crate::config::locate_template_configs;
 use crate::git;
 use crate::git::tmp_dir;
 use crate::interactive::prompt_and_check_variable;
 use crate::progressbar;
 use crate::progressbar::spinner;
 use crate::project_variables::{TemplateSlots, VarInfo};
-use crate::stm32_device::chip_info::{ChipInfo, HSI_DEFAULT};
 use crate::stm32_device::chip_info::FREQ;
+use crate::stm32_device::chip_info::{ChipInfo, HSI_DEFAULT};
+use crate::template_config::locate_template_configs;
 use crate::template_filters::*;
-use crate::template_variables::{get_authors, /*get_os_arch,*/ Authors};
 use crate::template_variables::project_name::ProjectType;
+use crate::template_variables::{get_authors, /*get_os_arch,*/ Authors};
 use crate::user_parsed_input::TemplateLocation;
 use crate::user_parsed_input::UserParsedInput;
 
@@ -116,9 +116,8 @@ pub fn set_project_variables(
         ProjectType::DemoProject(_) => {
             let hsi_freq = HashMap::from(HSI_DEFAULT);
             let family = chipinfo.family.clone();
-            let hsi_freq= hsi_freq.get(family.to_string().as_str()).unwrap();
+            let hsi_freq = hsi_freq.get(family.to_string().as_str()).unwrap();
             liquid_object.insert("HSI_freq".into(), Value::Scalar((*hsi_freq).into()));
-            liquid_object.insert("HSI_freq".into(), Value::Scalar(freq.into()));
         }
         _ => {}
     }
