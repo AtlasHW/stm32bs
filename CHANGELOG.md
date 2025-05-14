@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.4] 2025-05-13
+
+[0.0.3]: https://github.com/AtlasHW/stm32bs
+
+### 🛠️ Maintenance
+
+- Removed gix-config dependency, using sqlite to store chip information
+
 ## [0.0.3] 2025-05-01
 
 [0.0.3]: https://github.com/AtlasHW/stm32bs

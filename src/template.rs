@@ -11,15 +11,11 @@ use std::{
     path::{Path, PathBuf},
 };
 use tempfile::TempDir;
-//use walkdir::{DirEntry, WalkDir};
 
-use crate::git;
-use crate::git::tmp_dir;
 use crate::interactive::prompt_and_check_variable;
 use crate::progressbar;
 use crate::progressbar::spinner;
 use crate::project_variables::{TemplateSlots, VarInfo};
-use crate::stm32_device::chip_info::FREQ;
 use crate::stm32_device::chip_info::{ChipInfo, HSI_DEFAULT};
 use crate::template_config::locate_template_configs;
 use crate::template_filters::*;
@@ -27,6 +23,8 @@ use crate::template_variables::project_name::ProjectType;
 use crate::template_variables::{get_authors, /*get_os_arch,*/ Authors};
 use crate::user_parsed_input::TemplateLocation;
 use crate::user_parsed_input::UserParsedInput;
+use crate::utils;
+use crate::utils::tmp_dir;
 
 pub fn create_liquid_engine() -> Parser {
     ParserBuilder::with_stdlib()
@@ -77,38 +75,37 @@ pub fn set_project_variables(
     );
     liquid_object.insert(
         "pac_name".into(),
-        Value::Scalar(chipinfo.pac.pac_name.to_owned().into()),
+        Value::Scalar(chipinfo.pac_name.to_owned().into()),
     );
     liquid_object.insert(
         "pac_ver".into(),
-        Value::Scalar(chipinfo.pac.version.to_owned().into()),
+        Value::Scalar(chipinfo.pac_ver.to_owned().into()),
     );
     liquid_object.insert(
         "pac_feature".into(),
-        Value::Scalar(chipinfo.pac.features.to_owned().into()),
+        Value::Scalar(chipinfo.pac_feature.to_owned().into()),
     );
     liquid_object.insert("flash_origin".into(), Value::Scalar("0x08000000".into()));
     liquid_object.insert(
         "flash_size".into(),
         Value::Scalar(chipinfo.flash.to_owned().into()),
     );
-    liquid_object.insert("ram1_origin".into(), Value::Scalar("0x20000000".into()));
+    liquid_object.insert("ram_origin".into(), Value::Scalar("0x20000000".into()));
     liquid_object.insert(
-        "ram1_size".into(),
-        Value::Scalar(chipinfo.ram1.to_owned().into()),
+        "ram_size".into(),
+        Value::Scalar(chipinfo.ram.to_owned().into()),
     );
-    liquid_object.insert("pn".into(), Value::Scalar(chipinfo.pn.to_owned().into()));
+    liquid_object.insert("ccmram_origin".into(), Value::Scalar("0x10000000".into()));
+    liquid_object.insert(
+        "ccmram_size".into(),
+        Value::Scalar(chipinfo.ccmram.to_owned().into()),
+    );
+    liquid_object.insert("pn".into(), Value::Scalar(chipinfo.cpn.to_owned().into()));
+    if let Some(core2) = chipinfo.core2 {
+        liquid_object.insert("core2".into(), Value::Scalar(core2.to_string().into()));
+    }
 
-    let freq = match chipinfo.freq {
-        FREQ::SINGLE(f) => f,
-        FREQ::DUAL(f1, f2) => {
-            if f1 > f2 {
-                f2
-            } else {
-                f1
-            }
-        }
-    };
+    let freq =  chipinfo.freq;
     match project_type {
         ProjectType::BSPProject => {
             liquid_object.insert("frequency".into(), Value::Scalar(freq.into()));
@@ -248,7 +245,7 @@ pub fn render_string_gracefully(
 pub fn get_source_template_into_temp(template_location: &TemplateLocation) -> Result<TempDir> {
     match template_location {
         TemplateLocation::Git(git) => {
-            let result = git::clone_git_template_into_temp(
+            let result = utils::clone_git_template_into_temp(
                 git.url(),
                 git.branch(),
                 git.tag(),
@@ -258,19 +255,15 @@ pub fn get_source_template_into_temp(template_location: &TemplateLocation) -> Re
                 git.skip_submodules,
             );
             if let Result::Ok(ref temp_dir) = result {
-                git::remove_history(temp_dir.path())?;
+                utils::remove_history(temp_dir.path())?;
             };
             result
         }
         TemplateLocation::Path(path) => {
             let temp_dir = tmp_dir()?;
-            //copy_files_recursively(path, temp_dir.path(), false)?;
             let mut file_list = fs::read_dir(path)?
                 .map(|res| res.map(|e| e.path()))
                 .collect::<Result<Vec<_>, std::io::Error>>()?;
-            // for filename in  fs::read_dir(path)?
-            //     .map(|res| res.map(|e| e.path()))
-            //     .collect::<Result<Vec<_>, std::io::Error>>()?
             loop {
                 if file_list.is_empty() {
                     break;
@@ -304,7 +297,7 @@ pub fn get_source_template_into_temp(template_location: &TemplateLocation) -> Re
                 }
                 std::fs::copy(filename, dst_path)?;
             }
-            git::remove_history(temp_dir.path())?;
+            utils::remove_history(temp_dir.path())?;
             Ok(temp_dir)
         }
     }

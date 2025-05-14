@@ -2,7 +2,7 @@
 mod absolute_path;
 mod app_log;
 mod args;
-mod git;
+mod database;
 mod interactive;
 mod progressbar;
 mod project_config;
@@ -13,15 +13,13 @@ mod template_config;
 mod template_filters;
 mod template_variables;
 mod user_parsed_input;
+mod utils;
 
 use app_log::log_env_init;
 use args::*;
 use interactive::LIST_SEP;
 use liquid::ValueView;
-use stm32_device::chip_info::ChipInfo;
-use stm32_device::chip_info::ChipStatus;
 use stm32_device::chip_pn::get_chip_pn;
-use stm32_device::device_list::{DeviceList, PAC_INFO_FILE_NAME, PRODUCT_LIST_FILE_NAME};
 use template::{create_liquid_object, set_project_variables};
 use template_config::TemplateConfig;
 use template_config::{Config, CONFIG_FILE_NAME};
@@ -36,7 +34,7 @@ use console::style;
 use indexmap::IndexMap;
 use liquid_core::model::map::Entry;
 use liquid_core::Object;
-use log::{error, info, warn};
+use log::{error, info};
 use std::vec;
 use std::{
     collections::HashMap,
@@ -96,17 +94,14 @@ fn generate(args: AppArgs) -> Result<PathBuf> {
     // read configuration in the template
     let mut config =
         Config::from_path(&locate_template_file(CONFIG_FILE_NAME, &template_dir).ok())?;
-    let device_list = DeviceList::try_from_path(
-        locate_template_file(PRODUCT_LIST_FILE_NAME, &template_dir).unwrap(),
-    )?;
-    let pac_file = locate_template_file(PAC_INFO_FILE_NAME, &template_dir).unwrap();
+    //Initialize Databas
+    database::db_init(template_dir.join("stm32bs.db"))?;
+    //let pac_file = locate_template_file(PAC_INFO_FILE_NAME, &template_dir).unwrap();
     check_stm32bs_version(&config)?;
     let project_dir = expand_template(
         &template_dir,
         &mut config,
-        &device_list,
         &user_parsed_input,
-        &pac_file,
     )?;
     info!(
         "✨ {} {} {}",
@@ -131,9 +126,7 @@ fn locate_template_file(name: &str, template_folder: impl AsRef<Path>) -> Result
 fn expand_template(
     template_dir: &Path,
     config: &mut Config,
-    devicelist: &DeviceList,
     user_parsed_input: &UserParsedInput,
-    pac_file: &PathBuf,
 ) -> Result<PathBuf> {
     // create a liquid object with the template variables
     let mut liquid_object = create_liquid_object(user_parsed_input)?;
@@ -141,19 +134,8 @@ fn expand_template(
     let project_name = get_project_name(user_parsed_input);
 
     // build a supported chip info list
-    let chip_pn = get_chip_pn(user_parsed_input, &devicelist).unwrap();
-    let chip_info_raw = devicelist.devices.get(&chip_pn).unwrap();
-    let chip_info = ChipInfo::try_from_string(chip_pn, chip_info_raw, pac_file)?;
-    if chip_info.status == ChipStatus::NRND {
-        warn!(
-            "{}",
-            style(format!(
-                "Cation: The chip is NRND ( Not Recommended for New Designs )."
-            ))
-            .bold()
-            .red()
-        );
-    }
+    let chip_pn = get_chip_pn(user_parsed_input)?;
+    let chip_info = database::resource::get_resource(&chip_pn)?;
     if user_parsed_input.is_verbose() {
         info!("{:?}", chip_info);
     }

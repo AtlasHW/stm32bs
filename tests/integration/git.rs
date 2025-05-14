@@ -1,7 +1,3 @@
-use bstr::ByteSlice;
-use gix_config::File as GitConfig;
-use std::ops::Deref;
-
 use crate::helpers::prelude::*;
 
 #[test]
@@ -86,55 +82,4 @@ fn it_removes_git_history_also_on_local_templates() {
 
     let target_path = dir.target_path("xyz");
     assert!(!target_path.join(".git").exists());
-}
-
-#[test]
-fn should_retrieve_an_instead_of_url() {
-    let input = r#"
-[url "ssh://git@github.com:"]
-    insteadOf = https://github.com/
-"#;
-    let mut config = GitConfig::try_from(input).unwrap();
-    let url = config
-        .string_by("url", Some("ssh://git@github.com:".into()), "insteadOf")
-        .unwrap();
-    assert_eq!(url.deref(), "https://github.com/");
-    config
-        .set_raw_value_by(
-            "url",
-            Some("ssh://git@github.com:".into()),
-            "insteadOf",
-            "foo",
-        )
-        .unwrap();
-}
-
-#[test]
-fn should_find_them_all() {
-    let input = r#"
-[url "ssh://git@github.com:"]
-    insteadOf = https://github.com/
-[url "ssh://git@bitbucket.org:"]
-    insteadOf = https://bitbucket.org/
-"#;
-    let config = GitConfig::try_from(input).unwrap();
-    let url = config.sections_by_name("url").unwrap();
-    assert_eq!(config.sections_by_name("url").unwrap().count(), 2);
-
-    for section in url {
-        let head = section.header();
-        let body = section.body();
-
-        let url = head.subsection_name().as_ref().unwrap().to_str().unwrap();
-
-        let instead_of_value = body.value("insteadOf").unwrap();
-        let instead_of = instead_of_value.to_str().unwrap();
-        if instead_of.contains("github") {
-            assert_eq!(url, "ssh://git@github.com:");
-            assert_eq!(instead_of, "https://github.com/")
-        } else {
-            assert_eq!(url, "ssh://git@bitbucket.org:");
-            assert_eq!(instead_of, "https://bitbucket.org/")
-        }
-    }
 }

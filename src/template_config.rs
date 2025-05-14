@@ -151,7 +151,7 @@ pub fn replenish_include_file<P: AsRef<Path>>(
 
 #[cfg(test)]
 mod tests {
-    use crate::git::tmp_dir;
+    use crate::utils::tmp_dir;
 
     use super::*;
     use std::fs::File;

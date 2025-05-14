@@ -27,7 +27,7 @@ pub fn name() -> Result<String> {
 }
 
 pub fn chip_pn() -> Result<String> {
-    let valid_ident = regex::Regex::new(r"^([Ss][Tt][Mm][3][2][a-zA-Z0-9]{4,11})$")?;
+    let valid_ident = regex::Regex::new(r"^([\w]{3,15})$")?;
     let project_var = TemplateSlots {
         var_name: "chip_pn".into(),
         prompt: "🤷 Chip Part Number (eg. stm32g071cbt6)".into(),
