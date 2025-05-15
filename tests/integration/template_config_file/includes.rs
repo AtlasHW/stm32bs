@@ -25,7 +25,7 @@ fn it_only_processes_include_files_in_config() {
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()

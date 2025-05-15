@@ -9,7 +9,7 @@ use git2::ProxyOptions;
 use log::info;
 use log::warn;
 use regex::Regex;
-use remove_dir_all::remove_dir_all;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::Duration;
@@ -55,7 +55,7 @@ pub fn clone_git_template_into_temp(
     let mut url = git_url.to_string();
 
     #[cfg(windows)]
-    let authenticator = GitAuthenticator::default().try_ssh_agent(true);
+    let mut authenticator = GitAuthenticator::default().try_ssh_agent(true);
     #[cfg(not(windows))]
     let mut authenticator = GitAuthenticator::default()
         .try_ssh_agent(true)
@@ -197,7 +197,7 @@ pub fn remove_history(project_dir: &Path) -> Result<()> {
 
         loop {
             attempt += 1;
-            if let Err(e) = remove_dir_all(&git_dir) {
+            if let Err(e) = fs::remove_dir_all(&git_dir) {
                 if attempt == 5 {
                     bail!("{}", e.to_string());
                 }

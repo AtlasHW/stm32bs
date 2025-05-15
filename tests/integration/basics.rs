@@ -8,7 +8,7 @@ fn it_can_use_a_plain_folder() {
 
     binary()
         .arg_name("foobar-project")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg(template.path())
         .current_dir(dir.path())
@@ -43,7 +43,7 @@ fn it_can_use_a_specified_path() {
 
     binary()
         .arg_name("foobar-project")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg_path(template.path())
         .current_dir(dir.path())
@@ -64,13 +64,13 @@ fn it_can_use_a_specified_path() {
 }
 
 #[test]
-fn it_substitutes_projectname_in_cargo_toml() {
+fn it_substitutes_lowcase_chip_pn() {
     let template = tempdir().init_default_template().build();
 
     let dir = tempdir().build();
 
     binary()
-        .arg_chip("STM32C011D6")
+        .arg_chip("stm32g071cbt6tr")
         .arg_type("empty")
         .arg_git(template.path())
         .arg_name("foobar-project")
@@ -105,7 +105,7 @@ version = "0.1.0"
 
     binary()
         .arg_git(template.path())
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg_name("foobar-project")
         .arg_branch("main")
@@ -145,7 +145,7 @@ version = ">=0.0.3"
 
     binary()
         .arg_git(template.path())
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg_name("foobar-project")
         .arg_branch("main")
@@ -162,7 +162,7 @@ version = ">=0.0.3"
 }
 
 #[test]
-fn it_substitutes_cratename_in_a_rust_file() {
+fn it_can_render_pac_name() {
     let template = tempdir()
         .with_default_manifest()
         .file(
@@ -180,7 +180,7 @@ extern crate {{pac_name}};
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -188,7 +188,7 @@ extern crate {{pac_name}};
         .stdout(predicates::str::contains("Done!").from_utf8());
 
     let file = dir.read("foobar-project/src/main.rs");
-    assert!(file.contains("stm32c0"));
+    assert!(file.contains("stm32g0"));
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn short_commands_work() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
@@ -220,7 +220,7 @@ fn it_can_generate_inside_existing_repository() -> anyhow::Result<()> {
     binary()
         .arg_git(template.path())
         .arg_name("outer")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -232,7 +232,7 @@ fn it_can_generate_inside_existing_repository() -> anyhow::Result<()> {
     binary()
         .arg_git(template.path())
         .arg_name("inner")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(&outer_project_dir)
         .assert()
@@ -254,7 +254,7 @@ fn it_can_generate_into_cwd() -> anyhow::Result<()> {
     binary()
         .arg_git(template.path())
         .arg_name("my-proj")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -281,7 +281,7 @@ fn it_can_generate_into_existing_git_dir() -> anyhow::Result<()> {
     binary()
         .arg_git(template.path())
         .arg_name("my-proj")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -303,7 +303,7 @@ fn it_can_generate_at_given_path() -> anyhow::Result<()> {
     fs::create_dir(&dest).expect("can create directory");
     binary()
         .arg_git(template.path())
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg_name("my-proj")
         .arg("--destination")
@@ -325,14 +325,14 @@ fn it_does_not_overwrite_existing_files() -> anyhow::Result<()> {
     let _ = binary()
         .arg_git(template.path())
         .arg_name("my-proj")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .status();
     binary()
         .arg_git(template.path())
         .arg_name("overwritten-proj")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -348,14 +348,14 @@ fn it_can_overwrite_files() -> anyhow::Result<()> {
     let _ = binary()
         .arg_git(template.path())
         .arg_name("my-proj")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .status();
     binary()
         .arg_git(template.path())
         .arg_name("overwritten-proj")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg("--overwrite")
         .current_dir(dir.path())
@@ -380,7 +380,7 @@ fn it_always_removes_genignore_file() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
@@ -414,7 +414,7 @@ fn it_always_removes_cargo_ok_file() {
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -448,7 +448,7 @@ fn it_removes_genignore_files_before_substitution() {
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -497,7 +497,7 @@ fn it_does_not_remove_files_from_outside_project_dir() {
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -538,7 +538,7 @@ fn errant_ignore_entry_doesnt_affect_template_files() {
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -590,7 +590,7 @@ fn it_loads_a_submodule() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
@@ -634,7 +634,7 @@ fn it_allows_relative_paths() {
         .arg_git(relative_path)
         .arg_name("foobar-project")
         .arg_branch("main")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -654,7 +654,7 @@ fn it_doesnt_warn_with_neither_config_nor_ignore() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
@@ -686,7 +686,7 @@ fn it_processes_dot_github_directory_files() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
@@ -734,7 +734,7 @@ _This README was generated with [cargo-readme](https://github.com/livioribeiro/c
         .arg_git(template.path())
         .arg_name("foobar-project")
         .arg_branch("main")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -759,7 +759,7 @@ fn it_dont_initializing_repository() {
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -793,7 +793,7 @@ version = "0.1.0"
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()
@@ -825,7 +825,7 @@ version = "0.1.0"
     binary()
         .arg_git(template.path())
         .arg_name("foobar-project")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .arg_branch("main")
         .current_dir(dir.path())
@@ -853,7 +853,7 @@ fn error_message_for_invalid_repo_or_user() {
     binary()
         .arg_git("sassman/cli-template-rs-xx")
         .arg_name("favorite-project")
-        .arg_chip("STM32C011D6")
+        .arg_chip("STM32G071CBT6TR")
         .arg_type("empty")
         .current_dir(dir.path())
         .assert()

@@ -1,10 +1,12 @@
 [package]
 name = "cargo-stm32bs"
 description = "STM32bs, to create a stm32 project!"
-version = "0.0.4"
+version = "0.0.5"
 authors = ["Atlas Song Kai"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/AtlasHW/stm32bs"
+documentation = "https://docs.rs/cargo-stm32bs"
+categories = ["template-engine", "command-line-utilities"]
 edition = "2021"
 include = ["src/**/*", "LICENSE-*", "*.md"]
 
@@ -32,7 +34,6 @@ liquid-lib = "~0.26"
 log = "~0.4"
 openssl = { version = "~0.10", optional = true }
 paste = "~1.0"
-remove_dir_all = "~1.0"
 semver = { version = "~1.0", features = ["serde"] }
 serde = { version = "~1.0", features = ["derive"] }
 tempfile = "~3.19"
@@ -43,7 +44,7 @@ sqlite = "0.37.0"
 
 [dev-dependencies]
 assert_cmd = "~2.0"
-bstr = "*"
+bstr = "1.12.0"
 indoc = "~2.0"
 predicates = "~3.1"
 url = "~2.5"

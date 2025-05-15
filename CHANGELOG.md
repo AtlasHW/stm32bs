@@ -1,8 +1,16 @@
 # Changelog
 
+## [0.0.5] 2025-05-13
+
+[0.0.5]: https://github.com/AtlasHW/stm32bs
+
+### 🛠️ Maintenance
+
+- Fix install failure in windows system
+
 ## [0.0.4] 2025-05-13
 
-[0.0.3]: https://github.com/AtlasHW/stm32bs
+[0.0.4]: https://github.com/AtlasHW/stm32bs
 
 ### 🛠️ Maintenance
 
