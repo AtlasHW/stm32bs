@@ -50,7 +50,7 @@ rustup target add thumbv8m.main-none-eabihf
 ``` 
 
 We recommend debug tools [probe-rs] as debug and download tools, you can download binstall first
-[probe-rs]https://probe.rs/
+[probe-rs]: https://probe.rs/
 ```sh
 cargo install binstall
 ``` 
