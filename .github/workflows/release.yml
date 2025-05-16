@@ -17,7 +17,7 @@ on:
 jobs:
   # call out to build.yml
   doing-a-build:
-    uses: cargo-generate/cargo-generate/.github/workflows/build.yml@main
+    uses: cargo-stm32bs/cargo-stm32bs/.github/workflows/build.yml@main
     secrets: inherit
 
   publish:
@@ -65,7 +65,7 @@ jobs:
         id: create_release
         uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.CI_CARGO_GENERATE_RELEASE_GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.CI_CARGO_STM32BS_RELEASE_GH_PAT }}
         with:
           # This pulls from the "Get Changelog Entry" step above, referencing it's ID to get its outputs object.
           # See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps

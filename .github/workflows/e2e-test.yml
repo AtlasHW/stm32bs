@@ -19,9 +19,10 @@ jobs:
           toolchain: stable
           default: true
           profile: minimal
-      - run: cargo install -f cargo-generate
-      - run: cargo generate rustwasm/wasm-pack-template --name demo
-      - name: verify demo works
+      - run: cargo install -f cargo-stm32bs
+      - run: cargo stm32bs --name blink --chip stm32g071cbt6tr --type empty
+      - name: verify blink works
         run: |
-          cd demo
+          cd blink
+          rust target add thumbv6m-none-eabi
           cargo build

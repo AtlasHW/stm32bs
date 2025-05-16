@@ -13,11 +13,11 @@ A clear and concise description of what the bug is.
 **make sure you**
 - [ ] I'm on the latest rust version `rustup update`
 - [ ] I'm on the latest cargo-generate version `cargo install cargo-generate`
-- [ ] In case you have an own `.gitconfig`, provide all sections that contains one of: `insteadOf`, `url`
+- [ ] others
 
 **To Reproduce**
 Steps to reproduce the behavior:
-1. `cargo generate <WHAT DID YOU RUN>`
+1. `cargo stm32bs --verbose`
 2. output it generated..
 3. See error
 
@@ -33,8 +33,8 @@ If applicable, add screenshots to help explain your problem.
  - Build tools: [e.g. msvc | gnu | gcc]
  - Shell: [e.g. powerShell | zsh | bash]
  - `rustc --version`: x
- - `cargo generate --version`: x
+ - `cargo stm32bs --version`: x
 
 **Additional context**
 
-<!-- maybe parts of your ~/.gitconfig should be provided? -->
+

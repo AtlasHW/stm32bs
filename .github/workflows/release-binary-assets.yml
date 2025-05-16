@@ -17,31 +17,31 @@ jobs:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             cross: true
-            binName: cargo-generate
+            binName: cargo-stm32bs
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             cross: true
-            binName: cargo-generate
+            binName: cargo-stm32bs
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             cross: true
-            binName: cargo-generate
+            binName: cargo-stm32bs
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             cross: true
-            binName: cargo-generate
+            binName: cargo-stm32bs
           - target: x86_64-apple-darwin
             os: macos-latest
             cross: false
-            binName: cargo-generate
+            binName: cargo-stm32bs
           - target: aarch64-apple-darwin
             os: macos-latest
             cross: true
-            binName: cargo-generate
+            binName: cargo-stm32bs
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             cross: false
-            binName: cargo-generate.exe
+            binName: cargo-stm32bs.exe
     steps:
       - uses: actions/checkout@v4
       - name: Setup Rust
@@ -86,7 +86,7 @@ jobs:
           TARGET: ${{ matrix.target }}
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          filename="cargo-generate-$TAG-$TARGET.tar.gz"
+          filename="cargo-stm32bs-$TAG-$TARGET.tar.gz"
           tar -czvf "$filename" README.md LICENSE-MIT LICENSE-APACHE -C "target/$TARGET/release" "${{ matrix.binName }}"
           echo "::set-output name=filename::$filename"
       - name: Upload Archive
